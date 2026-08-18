@@ -41,7 +41,7 @@ hedge_fund/
 ## 数据流
 
 1. TUI 主界面输入 `funds` 进入基金模式 → 主题选择（消费/医药/科技/新能源/红利/宽基指数/债券）
-2. `FundClient.list_funds(theme)` 拉取基金池 → 预筛（规模 ≥ 5 亿元 且 成立 ≥ 3 年）→ 取前 10 只（超出的按现有排序截断，实现时确定排序字段）
+2. `FundClient.list_funds(theme)` 拉取基金池 → 预筛（规模 ≥ 5 亿元 且 成立 ≥ 3 年）→ 按规模降序取前 10 只
 3. 逐只 `fetch_snapshot(code)` 构建 FundSnapshot
 4. 并行调用 FundAnalyst 分析（信号 + 置信度 + 中文理由）
 5. 汇总排序：按 信号强弱（bullish > neutral > bearish）再按置信度降序
@@ -94,7 +94,7 @@ hedge_fund/
   - 主题→池列表解析、预筛逻辑、排序逻辑
   - FundAnalyst 输出解析（mock LLM 返回）
 - 集成测试打 `@pytest.mark.live`，默认不跑
-- 不新增第三方依赖（请求库复用项目既有，实现时确认 pyproject）
+- 不新增第三方依赖：HTTP 复用项目既有 `requests`（pyproject 已有 ^2.32.0）
 
 ## 范围外（YAGNI）
 
