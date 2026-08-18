@@ -28,6 +28,16 @@ ALPHA_MODEL_REGISTRY: dict[str, type[AlphaModel]] = {
     "druckenmiller": DruckenmillerAgent,
 }
 
+# Imported LAST: fund_analyst/fund_quant pull in hedge_fund.fund, whose spec
+# module imports ALPHA_MODEL_REGISTRY from this package — a mid-file import
+# here would hit the registry mid-definition (circular).
+from hedge_fund.signals.fund_analyst import (  # noqa: E402
+    FundAnalyst,
+    FundVerdict,
+    _sort_verdicts,
+)
+from hedge_fund.signals.fund_quant import FundQuantModel, FundQuantResult  # noqa: E402
+
 __all__ = [
     "AlphaModel",
     "QuantModel",
@@ -37,6 +47,11 @@ __all__ = [
     "GrahamAgent",
     "LynchAgent",
     "DruckenmillerAgent",
+    "FundAnalyst",
+    "FundQuantModel",
+    "FundQuantResult",
+    "FundVerdict",
     "PEADModel",
+    "_sort_verdicts",
     "ALPHA_MODEL_REGISTRY",
 ]

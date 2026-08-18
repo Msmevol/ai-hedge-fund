@@ -70,12 +70,21 @@ from hedge_fund.fund import (
 from hedge_fund.models import Signal
 from hedge_fund.pipeline import CycleRecord, run_cycle
 from hedge_fund.pipeline.run_cycle import _MARK_LOOKBACK_DAYS
+# The palette is defined in shared.py — the single source both the app and
+# the fund picker screen import (app.tcss mirrors it by hand).
 from hedge_fund.tui.shared import (
+    BRIGHT,
+    CADENCE_LABELS,
+    CYAN,
     DEFAULT_CAPITAL,
     DEFAULT_RISK,
     DISPLAY_NAMES,
     FUNDS_DIR,
+    GREEN,
+    MUTED,
+    RED,
     STRATEGY_DIR,
+    TEXT,
     UNIVERSE_PRESETS,
     VERSION,
     _BACKTEST_WEEKS,
@@ -88,6 +97,7 @@ from hedge_fund.tui.shared import (
     _fund_label,
     _render_area_chart,
     _strategy_kind,
+    _strategy_title,
     _valid_date,
     ensure_mandates_dir,
     is_supported,
@@ -103,15 +113,9 @@ from hedge_fund.tui.keys import (
     save_credential,
 )
 from hedge_fund.signals import ALPHA_MODEL_REGISTRY, LLMAgent
+from hedge_fund.tui.fund_screen import FundPickerScreen
 
 # The palette, mirrored from app.tcss (rich styles can't read CSS variables).
-GREEN = "#2bd97c"
-CYAN = "#22d3ee"
-RED = "#f87171"
-TEXT = "#d9e6e0"
-BRIGHT = "#f2f7f4"
-MUTED = "#5f7268"
-
 _CUSTOM = "custom"  # sentinel value in the strategy list for "build your own"
 
 
@@ -122,9 +126,9 @@ class HomeScreen(Screen):
     """
 
     BINDINGS = [
-        Binding("m", "pick_model", "switch model"),
-        Binding("k", "set_key", "api key"),
-        Binding("escape", "quit_app", "quit"),
+        Binding("m", "pick_model", "切换模型"),
+        Binding("k", "set_key", "API 密钥"),
+        Binding("escape", "quit_app", "退出"),
     ]
 
     def compose(self) -> ComposeResult:
@@ -135,15 +139,21 @@ class HomeScreen(Screen):
             yield OptionList(
                 Option(
                     Text.assemble(
-                        ("Run an existing fund\n", "bold"),
-                        ("pick a saved fund and run it as of today", MUTED)),
+                        ("运行已有基金\n", "bold"),
+                        ("选择一个已保存的基金，按今天运行", MUTED)),
                     id="run"),
                 None,
                 Option(
                     Text.assemble(
-                        ("Build a new fund\n", "bold"),
-                        ("compose agents into strategies from scratch", MUTED)),
+                        ("构建新基金\n", "bold"),
+                        ("从零组合智能体为策略", MUTED)),
                     id="build"),
+                None,
+                Option(
+                    Text.assemble(
+                        ("基金选购\n", "bold"),
+                        ("国内场外公募基金主题分析，指导买入", MUTED)),
+                    id="funds"),
                 id="home-menu",
             )
             yield Static("", id="model-line")
@@ -180,12 +190,12 @@ class HomeScreen(Screen):
         it. Replacing a key that already works is allowed on purpose."""
         provider = provider_for(self._model_id)
         if provider is None:
-            self.notify("Model is not in the registry — set its key by hand.",
+            self.notify("该模型不在注册表中——请手动设置其密钥。",
                         severity="warning")
             return
         env_var = PROVIDER_ENV_VARS.get(provider)
         if env_var is None:
-            self.notify(f"No key is needed for {provider}.")
+            self.notify(f"{provider} 无需密钥。")
             return
         self.app.push_screen(KeyPromptScreen(provider, env_var),
                              lambda _: self._show_model())
@@ -198,10 +208,10 @@ class HomeScreen(Screen):
                       if mid == self._model_id), self._model_id)
         self.query_one("#model-line", Static).update(
             Text.assemble(
-                ("agents reason with  ", MUTED),
+                ("智能体推理模型：  ", MUTED),
                 (label, f"bold {GREEN}"),
                 (f"  {self._model_id}", MUTED),
-                ("   ·  m to switch", MUTED),
+                ("   ·  m 切换", MUTED),
             )
         )
 
@@ -211,6 +221,8 @@ class HomeScreen(Screen):
             self.app.push_screen(FundSelectScreen())
         elif event.option.id == "build":
             self.app.push_screen(BuilderScreen())
+        elif event.option.id == "funds":
+            self.app.push_screen(FundPickerScreen())
 
 
 class KeyPromptScreen(ModalScreen[bool]):
@@ -220,7 +232,7 @@ class KeyPromptScreen(ModalScreen[bool]):
     the value is never echoed back — the confirmation shows a masked form.
     """
 
-    BINDINGS = [Binding("escape", "cancel", "cancel")]
+    BINDINGS = [Binding("escape", "cancel", "取消")]
 
     def __init__(self, provider: str, env_var: str) -> None:
         super().__init__()
@@ -230,19 +242,17 @@ class KeyPromptScreen(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         with Vertical(id="keyprompt"):
             yield Static(Text.assemble(
-                (f"{self._provider} API key needed", f"bold {BRIGHT}")),
+                (f"需要 {self._provider} API 密钥", f"bold {BRIGHT}")),
                 id="key-q")
             yield Static(Text.assemble(
-                ("The fund cannot run without it. Paste it below and it "
-                 "is saved to\n", MUTED),
+                ("没有它基金无法运行。将密钥粘贴到下方，将被保存到\n", MUTED),
                 (str(ENV_PATH), TEXT),
-                ("\nwhich is owner-read-only and loaded automatically on "
-                 "every start.", MUTED)),
+                ("\n该文件仅所有者可读，每次启动时自动加载。", MUTED)),
                 id="key-blurb")
             yield Input(password=True, placeholder=self._env_var, id="key-input")
             yield Static(Text.assemble(
-                ("enter", f"bold {GREEN}"), ("  save and continue   ", MUTED),
-                ("esc", f"bold {BRIGHT}"), ("  cancel", MUTED)),
+                ("回车", f"bold {GREEN}"), ("  保存并继续   ", MUTED),
+                ("esc", f"bold {BRIGHT}"), ("  取消", MUTED)),
                 classes="hint")
         yield Footer()
 
@@ -253,10 +263,10 @@ class KeyPromptScreen(ModalScreen[bool]):
     def _save(self, event: Input.Submitted) -> None:
         key = event.value.strip()
         if not key:
-            self.notify("No key entered", severity="warning")
+            self.notify("未输入密钥", severity="warning")
             return
         path = save_credential(self._env_var, key)
-        self.notify(f"Saved {self._env_var} ({masked(key)}) to {path}")
+        self.notify(f"已将 {self._env_var}（{masked(key)}）保存到 {path}")
         self.dismiss(True)
 
     def action_cancel(self) -> None:
@@ -293,7 +303,7 @@ class ModelPickerScreen(ModalScreen[str | None]):
     dying halfway through on a model id ChatAnthropic will reject.
     """
 
-    BINDINGS = [Binding("escape", "cancel", "cancel")]
+    BINDINGS = [Binding("escape", "cancel", "取消")]
 
     def __init__(self, current: str) -> None:
         super().__init__()
@@ -301,10 +311,10 @@ class ModelPickerScreen(ModalScreen[str | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="picker"):
-            yield Static(Text("Agents reason with", style=f"bold {BRIGHT}"),
+            yield Static(Text("智能体推理模型", style=f"bold {BRIGHT}"),
                          id="picker-q")
             yield OptionList(*self._options(), id="picker-list")
-            yield Static(Text("enter to pick · esc to cancel", style=MUTED),
+            yield Static(Text("回车选择 · esc 取消", style=MUTED),
                          classes="hint")
         yield Footer()
 
@@ -314,7 +324,7 @@ class ModelPickerScreen(ModalScreen[str | None]):
             reachable = is_supported(provider)
             head = Text(provider.upper(), style=f"bold {BRIGHT}")
             if not reachable:
-                head.append("   no client in v2 yet", style=MUTED)
+                head.append("   v2 暂无对应客户端", style=MUTED)
             options.append(Option(head, disabled=True))
             for name, model_id, _ in models:
                 row = Text()
@@ -359,8 +369,8 @@ class FundSelectScreen(Screen):
     """
 
     BINDINGS = [
-        Binding("escape", "back", "back"),
-        Binding("d", "delete", "delete fund"),
+        Binding("escape", "back", "返回"),
+        Binding("d", "delete", "删除基金"),
     ]
 
     def __init__(self) -> None:
@@ -370,7 +380,7 @@ class FundSelectScreen(Screen):
     def compose(self) -> ComposeResult:
         with Horizontal(id="select"):
             with Vertical(id="select-rail"):
-                yield Static(Text("YOUR FUNDS", style=MUTED), classes="rail-title")
+                yield Static(Text("你的基金", style=MUTED), classes="rail-title")
                 yield OptionList(id="select-menu")
             with VerticalScroll(id="select-detail"):
                 yield Static("", id="detail-body")
@@ -394,7 +404,7 @@ class FundSelectScreen(Screen):
         menu.clear_options()
         if not self._slots:
             self.query_one("#detail-body", Static).update(
-                Text("No funds yet — go back and build one first.", style=MUTED))
+                Text("还没有基金——请返回先构建一个。", style=MUTED))
             return
         for i, (_, spec) in enumerate(self._slots):
             menu.add_option(Option(
@@ -440,8 +450,7 @@ class FundSelectScreen(Screen):
         gone = _delete_fund(path, spec.name, with_history=(scope == "all"))
         self._summaries.clear()  # the cache is keyed on paths that just went
         self._populate()
-        self.notify(f"Deleted {spec.name} — {gone} "
-                    f"{'file' if gone == 1 else 'files'} removed")
+        self.notify(f"已删除 {spec.name} —— 共移除 {gone} 个文件")
 
     def _show_detail(self, i: int) -> None:
         spec = self._slots[i][1]
@@ -488,9 +497,9 @@ class ConfirmDeleteScreen(ModalScreen[str | None]):
     """
 
     BINDINGS = [
-        Binding("escape", "cancel", "cancel"),
-        Binding("enter", "delete_mandate", "delete the mandate", priority=True),
-        Binding("ctrl+d", "delete_all", "delete mandate + history",
+        Binding("escape", "cancel", "取消"),
+        Binding("enter", "delete_mandate", "删除基金定义", priority=True),
+        Binding("ctrl+d", "delete_all", "删除定义与历史",
                 priority=True),
     ]
 
@@ -504,15 +513,15 @@ class ConfirmDeleteScreen(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm"):
             yield Static(Text.assemble(
-                ("Delete ", f"bold {BRIGHT}"),
+                ("删除 ", f"bold {BRIGHT}"),
                 (self._spec.name, f"bold {RED}"),
-                ("?", f"bold {BRIGHT}")), id="confirm-q")
+                ("？", f"bold {BRIGHT}")), id="confirm-q")
             yield Static(self._manifest(), id="confirm-files")
             yield Static(Text.assemble(
-                ("enter", f"bold {GREEN}"), ("   delete the mandate\n", MUTED),
+                ("回车", f"bold {GREEN}"), ("  只删除基金定义\n", MUTED),
                 ("ctrl+d", f"bold {RED}"),
-                ("  delete the mandate and its history\n", MUTED),
-                ("esc", f"bold {BRIGHT}"), ("     cancel", MUTED)),
+                ("  删除基金定义及其历史记录\n", MUTED),
+                ("esc", f"bold {BRIGHT}"), ("      取消", MUTED)),
                 id="confirm-keys")
         yield Footer()
 
@@ -521,18 +530,17 @@ class ConfirmDeleteScreen(ModalScreen[str | None]):
         when the thing being counted cannot be recovered."""
         lines = Text()
         lines.append(f"{self._path.name}\n", style=TEXT)
-        lines.append("  the mandate — strategies, staff, risk, capital\n\n",
+        lines.append("  基金定义——策略、人员、风控、资金\n\n",
                      style=MUTED)
         if self._runs or self._backtests:
             lines.append(
-                f"{self._runs} {'run' if self._runs == 1 else 'runs'}"
-                f"  ·  {self._backtests} "
-                f"{'backtest' if self._backtests == 1 else 'backtests'}\n",
+                f"{self._runs} 次运行"
+                f"  ·  {self._backtests} 次回测\n",
                 style=CYAN)
-            lines.append("  saved receipts — kept unless you press ctrl+d",
+            lines.append("  已保存的执行记录——除非按 ctrl+d 否则保留",
                          style=MUTED)
         else:
-            lines.append("No saved runs or backtests.", style=MUTED)
+            lines.append("没有已保存的运行或回测记录。", style=MUTED)
         return lines
 
     def action_cancel(self) -> None:
@@ -618,8 +626,9 @@ def _slot_card(index: int, spec: FundSpec, score: tuple | None) -> Text:
         up = total >= 0
         card.append(f"   {'▲' if up else '▼'} {total:+.1%}",
                     style=f"bold {GREEN if up else RED}")
-    card.append(f"\n     {n} {'strategy' if n == 1 else 'strategies'}"
-                f"  ·  {spec.rebalance}", style=MUTED)
+    card.append(f"\n     {n} 个策略  ·  "
+                f"{CADENCE_LABELS.get(spec.rebalance, spec.rebalance)}",
+                style=MUTED)
     return card
 
 
@@ -627,16 +636,17 @@ def _fund_detail(spec: FundSpec, history: list[dict]) -> Group:
     """The right pane: the fund's identity, its latest backtest stats, then
     everything it has done — runs and backtests, newest first, each with the
     tickers it was pointed at."""
-    staff = ", ".join(s.title for s in spec.strategies)
+    staff = ", ".join(_strategy_title(s) for s in spec.strategies)
     parts: list = [
         Text(spec.name, style=f"bold {BRIGHT}"),
-        Text(f"{staff}  ·  {spec.rebalance}  ·  ${spec.capital:,.0f}", style=MUTED),
+        Text(f"{staff}  ·  {CADENCE_LABELS.get(spec.rebalance, spec.rebalance)}"
+             f"  ·  ${spec.capital:,.0f}", style=MUTED),
     ]
 
     if not history:
-        parts.append(Text("\nNo runs yet — this fund has never traded.", style=MUTED))
-        parts.append(Text("\nEnter to run it as of today · ctrl+b to backtest "
-                          "over history", style=MUTED))
+        parts.append(Text("\n还没有运行记录——该基金从未交易过。", style=MUTED))
+        parts.append(Text("\n回车按今天运行 · ctrl+b 回测历史",
+                          style=MUTED))
         return Group(*parts)
 
     # The headline stats come from the most recent BACKTEST (a single run has
@@ -646,14 +656,14 @@ def _fund_detail(spec: FundSpec, history: list[dict]) -> Group:
         # A universe is only present on newer receipts — join what exists so an
         # older backtest doesn't render a dangling separator.
         facts = [f"{latest['start']} → {latest['end']}",
-                 f"{latest['n_cycles']} cycles"]
+                 f"{latest['n_cycles']} 个周期"]
         if latest["universe"]:
             facts.append(" ".join(latest["universe"]))
-        parts.append(Text("\nLATEST BACKTEST", style=f"bold {BRIGHT}"))
+        parts.append(Text("\n最近回测", style=f"bold {BRIGHT}"))
         parts.append(Text("  ·  ".join(facts), style=MUTED))
         parts.append(_stat_list(latest))
 
-    parts.append(Text("\nRUNS & BACKTESTS", style=f"bold {BRIGHT}"))
+    parts.append(Text("\n运行与回测", style=f"bold {BRIGHT}"))
     # Three columns, not four. The kind and the number are pinned with no_wrap
     # so a narrow pane can never drop the result — the tickers ride along in
     # the middle column and are the only thing allowed to ellipsize.
@@ -670,7 +680,7 @@ def _fund_detail(spec: FundSpec, history: list[dict]) -> Group:
             if h["universe"]:
                 when.append(f"  {tickers}", style=CYAN)
             log.add_row(
-                Text("backtest", style=MUTED), when,
+                Text("回测", style=MUTED), when,
                 Text(f"{h['total']:+.1%}", style=GREEN if up else RED),
             )
         else:
@@ -678,7 +688,7 @@ def _fund_detail(spec: FundSpec, history: list[dict]) -> Group:
             if h["universe"]:
                 when.append(f"  {tickers}", style=CYAN)
             log.add_row(
-                Text("run", style=MUTED), when,
+                Text("运行", style=MUTED), when,
                 Text(f"NAV ${h['nav']:,.0f}", style=BRIGHT),
             )
     parts.append(log)
@@ -705,17 +715,17 @@ def _stat_list(bt: dict) -> Table:
     table = Table(box=None, show_header=False, padding=(0, 1), pad_edge=False)
     table.add_column(style=MUTED, width=14)
     table.add_column(justify="right", min_width=8)
-    table.add_row("Total return", Text(
+    table.add_row("总回报", Text(
         f"{bt['total']:+.1%}",
         style=f"bold {GREEN if bt['total'] >= 0 else RED}"))
-    table.add_row("Annualized", Text(f"{bt['annualized']:+.1%}", style=TEXT))
-    table.add_row("Sharpe", Text(
+    table.add_row("年化", Text(f"{bt['annualized']:+.1%}", style=TEXT))
+    table.add_row("夏普", Text(
         f"{bt['sharpe']:.2f}",
         style=(GREEN if bt["sharpe"] > 1
                else "yellow" if bt["sharpe"] > 0 else RED)))
-    table.add_row("Max drawdown", Text(f"{bt['maxdd']:.1%}", style=RED))
+    table.add_row("最大回撤", Text(f"{bt['maxdd']:.1%}", style=RED))
     table.add_row(bt["benchmark"], Text(f"{bt['benchret']:+.1%}", style=TEXT))
-    table.add_row("Excess", Text(
+    table.add_row("超额", Text(
         f"{bt['excess']:+.1%}",
         style=f"bold {GREEN if bt['excess'] >= 0 else RED}"))
     return table
@@ -735,11 +745,11 @@ def _roster_table(order: list[str], state: dict[str, tuple[str, str | None]]) ->
         row = Text()
         if status == "done":
             row.append("✓ ", f"bold {GREEN}")
-            row.append(f"{name:<24}", "bold")
-            row.append("Done", GREEN)
+            row.append(f"{name:<28}", "bold")
+            row.append("完成", GREEN)
         elif status == "working":
             row.append("⋯ ", "yellow")
-            row.append(f"{name:<24}", "bold")
+            row.append(f"{name:<28}", "bold")
             symbol, _, as_of = (label or "").partition(" · ")
             row.append("[", CYAN)
             row.append(symbol, CYAN)
@@ -747,11 +757,11 @@ def _roster_table(order: list[str], state: dict[str, tuple[str, str | None]]) ->
                 row.append(" · ", CYAN)
                 row.append(as_of, RED)
             row.append("] ", CYAN)
-            row.append("Analyzing", "yellow")
+            row.append("分析中", "yellow")
         else:
             row.append("⋯ ", MUTED)
-            row.append(f"{name:<24}", MUTED)
-            row.append("queued", MUTED)
+            row.append(f"{name:<28}", MUTED)
+            row.append("排队中", MUTED)
         table.add_row(row)
     return table
 
@@ -764,6 +774,13 @@ _VERDICT_STYLE = {
     "bearish": ("▼", RED),
     "neutral": ("–", "yellow"),
     "abstain": ("·", MUTED),
+}
+
+_VERDICT_WORDS = {
+    "bullish": "看多",
+    "bearish": "看空",
+    "neutral": "中性",
+    "abstain": "弃权",
 }
 
 
@@ -779,7 +796,7 @@ def _verdict(signal: Signal) -> tuple[str, str, str]:
     else:
         word = "neutral"
     glyph, colour = _VERDICT_STYLE[word]
-    return (glyph, word.upper(), colour)
+    return (glyph, _VERDICT_WORDS[word], colour)
 
 
 class _Desk:
@@ -838,7 +855,7 @@ def _desk_table(desks: list[_Desk]) -> Table:
     # terminal is narrow, and the verdict degrades to "▲…" — which is the one
     # cell that must always be legible.
     table.add_column(width=1)                                     # status glyph
-    table.add_column(width=20, no_wrap=True)                      # analyst
+    table.add_column(width=28, no_wrap=True)                      # analyst
     table.add_column(width=5, no_wrap=True)                       # ticker
     table.add_column(width=14, no_wrap=True)                      # verdict
     table.add_column(ratio=1, overflow="ellipsis", no_wrap=True)  # thesis, live
@@ -846,10 +863,10 @@ def _desk_table(desks: list[_Desk]) -> Table:
     for desk in desks:
         if desk.status == "done":
             table.add_row(Text("✓", f"bold {GREEN}"), Text(desk.who, "bold"),
-                          Text(""), Text("Done", GREEN), Text(""))
+                          Text(""), Text("完成", GREEN), Text(""))
         elif desk.status == "queued":
             table.add_row(Text("⋯", MUTED), Text(desk.who, MUTED), Text(""),
-                          Text(""), Text("queued", MUTED))
+                          Text(""), Text("排队中", MUTED))
         else:
             table.add_row(
                 Text("⋯", "yellow"),
@@ -871,10 +888,14 @@ def _live_verdict(desk: _Desk) -> Text:
         return Text.assemble((f"{glyph} ", colour), (label, f"bold {colour}"))
     stream = desk.stream
     if stream is None or stream.signal is None:
-        return Text("thinking", MUTED)
+        return Text("思考中", MUTED)
     glyph, colour = _VERDICT_STYLE.get(stream.signal, ("·", MUTED))
+    label = stream.verdict() or ""
+    head, _, rest = label.partition(" ")
+    head = _VERDICT_WORDS.get(head.lower(), head) or head
+    label = (head + " " + rest) if rest else head
     return Text.assemble((f"{glyph} ", colour),
-                         (stream.verdict() or "", f"bold {colour}"))
+                         (label, f"bold {colour}"))
 
 
 def _live_thesis(desk: _Desk) -> Text:
@@ -908,7 +929,7 @@ def _report_nav(record: CycleRecord) -> list[Option]:
         if si:
             options.append(Option(Text(""), disabled=True))
         options.append(Option(
-            Text.assemble((strategy.title, f"bold {BRIGHT}"),
+            Text.assemble((_strategy_title(strategy), f"bold {BRIGHT}"),
                           (f" ({sr.slice:.0%})", MUTED)),
             disabled=True,
         ))
@@ -917,7 +938,7 @@ def _report_nav(record: CycleRecord) -> list[Option]:
             confidence = s.metadata.get("confidence")
             row = Text()
             row.append(f" {s.ticker:<6}", style=f"bold {CYAN}")
-            row.append(f"{_SHORT_NAMES.get(s.model_name, s.model_name):<15}",
+            row.append(f"{_SHORT_NAMES.get(s.model_name, s.model_name)}   ",
                        style=TEXT)
             row.append(f"{glyph} ", style=f"bold {tone}")
             row.append(f"{confidence:.0f}%" if confidence is not None else "  —",
@@ -925,13 +946,13 @@ def _report_nav(record: CycleRecord) -> list[Option]:
             options.append(Option(row, id=f"sig:{si}:{sj}"))
 
     options.append(Option(Text(""), disabled=True))
-    options.append(Option(Text("THE BOOK", style=f"bold {BRIGHT}"), disabled=True))
+    options.append(Option(Text("组合簿", style=f"bold {BRIGHT}"), disabled=True))
     if record.clamps:
         options.append(Option(
-            Text(f" Risk limits ({len(record.clamps)})", style=TEXT), id="sec:risk"))
+            Text(f" 风控限制（{len(record.clamps)}）", style=TEXT), id="sec:risk"))
     options.append(Option(
-        Text(f" Orders ({len(record.orders)})", style=TEXT), id="sec:orders"))
-    options.append(Option(Text(" Portfolio", style=TEXT), id="sec:portfolio"))
+        Text(f" 订单（{len(record.orders)}）", style=TEXT), id="sec:orders"))
+    options.append(Option(Text(" 组合持仓", style=TEXT), id="sec:portfolio"))
     return options
 
 
@@ -939,6 +960,9 @@ def _signal_detail(record: CycleRecord, si: int, sj: int) -> Group:
     """One analyst's full view: who, what, and the whole written thesis."""
     sr = record.strategies[si]
     signal = sr.signals[sj]
+    spec_by_name = {s.name: s for s in record.spec.strategies}
+    strategy_title = (_strategy_title(spec_by_name[sr.name])
+                      if sr.name in spec_by_name else sr.name)
     _, word, tone = _verdict(signal)
     confidence = signal.metadata.get("confidence")
     header = Text()
@@ -949,34 +973,34 @@ def _signal_detail(record: CycleRecord, si: int, sj: int) -> Group:
     facts = Text()
     facts.append(word, style=f"bold {tone}")
     if confidence is not None:
-        facts.append(f"  ·  {confidence:.0f}% confidence", style=MUTED)
-    facts.append(f"  ·  conviction {signal.value:+.2f}", style=MUTED)
-    facts.append(f"  ·  {sr.name}", style=MUTED)
+        facts.append(f"  ·  置信度 {confidence:.0f}%", style=MUTED)
+    facts.append(f"  ·  信念值 {signal.value:+.2f}", style=MUTED)
+    facts.append(f"  ·  {strategy_title}", style=MUTED)
     return Group(
         header,
         facts,
         Text(""),
-        Text(signal.reasoning or "no thesis recorded",
+        Text(signal.reasoning or "无推理记录",
              style=TEXT if signal.reasoning else MUTED),
     )
 
 
 def _risk_detail(record: CycleRecord) -> Group:
     table = Table(box=box.SQUARE, header_style="bold", border_style="#1f2b25")
-    table.add_column("Scope", style=f"bold {CYAN}")
-    table.add_column("Requested", justify="right")
-    table.add_column("Allowed", justify="right")
-    table.add_column("Limit", style="dim")
+    table.add_column("范围", style=f"bold {CYAN}")
+    table.add_column("请求", justify="right")
+    table.add_column("允许", justify="right")
+    table.add_column("限额", style="dim")
     for c in record.clamps:
         table.add_row(
-            c.ticker or "whole book",
+            c.ticker or "全组合",
             Text(f"{c.before:+.2f}", style="yellow"),
             Text(f"{c.after:+.2f}", style="bold"),
             c.limit,
         )
     return Group(
-        Text.assemble(("RISK LIMITS  ", f"bold {BRIGHT}"),
-                      ("hard caps the agents cannot override", MUTED)),
+        Text.assemble(("风控限制  ", f"bold {BRIGHT}"),
+                      ("智能体不可越过的硬性上限", MUTED)),
         Text(""),
         table,
     )
@@ -985,51 +1009,51 @@ def _risk_detail(record: CycleRecord) -> Group:
 def _orders_detail(record: CycleRecord) -> Group:
     if not record.orders:
         return Group(
-            Text("ORDERS", style=f"bold {BRIGHT}"),
+            Text("订单", style=f"bold {BRIGHT}"),
             Text(""),
-            Text("none — no conviction cleared the bar today", style=MUTED),
+            Text("无——今日没有信念达到门槛", style=MUTED),
         )
     table = Table(box=box.SQUARE, header_style="bold", border_style="#1f2b25")
-    table.add_column("Action", justify="center")
-    table.add_column("Quantity", justify="right")
-    table.add_column("Ticker", style=f"bold {CYAN}")
-    table.add_column("Price", justify="right")
+    table.add_column("方向", justify="center")
+    table.add_column("数量", justify="right")
+    table.add_column("代码", style=f"bold {CYAN}")
+    table.add_column("价格", justify="right")
     for o in record.orders:
         tone = f"bold {GREEN}" if o.side == "buy" else f"bold {RED}"
         table.add_row(
-            Text(o.side.upper(), style=tone),
+            Text("买入" if o.side == "buy" else "卖出", style=tone),
             Text(f"{o.quantity:,}", style=tone),
             o.ticker,
             f"${o.price:,.2f}",
         )
-    return Group(Text("ORDERS", style=f"bold {BRIGHT}"), Text(""), table)
+    return Group(Text("订单", style=f"bold {BRIGHT}"), Text(""), table)
 
 
 def _portfolio_detail(record: CycleRecord) -> Group:
     if not record.positions:
         return Group(
-            Text("PORTFOLIO", style=f"bold {BRIGHT}"),
+            Text("组合持仓", style=f"bold {BRIGHT}"),
             Text(""),
-            Text("flat — no positions", style=MUTED),
+            Text("空仓——无持仓", style=MUTED),
         )
     table = Table(box=box.SQUARE, header_style="bold", border_style="#1f2b25")
-    table.add_column("Ticker", style=f"bold {CYAN}")
-    table.add_column("Side", justify="center")
-    table.add_column("Shares", justify="right")
-    table.add_column("Value", justify="right")
-    table.add_column("Weight", justify="right")
+    table.add_column("代码", style=f"bold {CYAN}")
+    table.add_column("方向", justify="center")
+    table.add_column("股数", justify="right")
+    table.add_column("市值", justify="right")
+    table.add_column("权重", justify="right")
     for ticker in sorted(record.positions):
         shares = record.positions[ticker]
         value = shares * record.marks[ticker]
-        side = (Text("LONG", style=f"bold {GREEN}") if shares > 0
-                else Text("SHORT", style=f"bold {RED}"))
+        side = (Text("做多", style=f"bold {GREEN}") if shares > 0
+                else Text("做空", style=f"bold {RED}"))
         tone = GREEN if value >= 0 else RED
         table.add_row(
             ticker, side, f"{shares:+d}",
             Text(f"${value:+,.0f}", style=tone),
             Text(f"{value / record.nav:+.1%}", style=tone),
         )
-    return Group(Text("PORTFOLIO", style=f"bold {BRIGHT}"), Text(""), table)
+    return Group(Text("组合持仓", style=f"bold {BRIGHT}"), Text(""), table)
 
 
 def _book_summary(record: CycleRecord) -> Text:
@@ -1042,8 +1066,8 @@ def _book_summary(record: CycleRecord) -> Text:
     net = (long_val + short_val) / record.nav
     summary = Text()
     summary.append(f"NAV ${record.nav:,.2f}", style=f"bold {BRIGHT}")
-    summary.append(f"   Cash ${record.cash:,.0f}", style=CYAN)
-    summary.append(f"   Gross {gross:.0%}   Net {net:+.0%}", style=MUTED)
+    summary.append(f"   现金 ${record.cash:,.0f}", style=CYAN)
+    summary.append(f"   总敞口 {gross:.0%}   净敞口 {net:+.0%}", style=MUTED)
     return summary
 
 
@@ -1059,15 +1083,15 @@ def _tape_table(tape: list[tuple[str, Fill, int]]) -> Table:
         table.add_column(justify=justify)
 
     if not tape:
-        table.add_row(Text("no trades yet", style=MUTED))
+        table.add_row(Text("暂无成交", style=MUTED))
         return table
 
     for as_of, fill, shares in list(reversed(tape))[:_TAPE_ROWS]:
-        side = (Text("BUY ", style=f"bold {GREEN}") if fill.side == "buy"
-                else Text("SELL", style=f"bold {RED}"))
-        book = (Text(f"→ long {shares}", style=GREEN) if shares > 0
-                else Text(f"→ short {-shares}", style=RED) if shares < 0
-                else Text("→ flat", style=MUTED))
+        side = (Text("买入", style=f"bold {GREEN}") if fill.side == "buy"
+                else Text("卖出", style=f"bold {RED}"))
+        book = (Text(f"→ 做多 {shares}", style=GREEN) if shares > 0
+                else Text(f"→ 做空 {-shares}", style=RED) if shares < 0
+                else Text("→ 平仓", style=MUTED))
         table.add_row(
             Text(as_of, style=MUTED),
             Text(fill.ticker, style=f"bold {CYAN}"),
@@ -1078,7 +1102,7 @@ def _tape_table(tape: list[tuple[str, Fill, int]]) -> Table:
             book,
         )
     if len(tape) > _TAPE_ROWS:
-        table.add_row(Text(f"… {len(tape) - _TAPE_ROWS} earlier", style=MUTED))
+        table.add_row(Text(f"… 还有 {len(tape) - _TAPE_ROWS} 笔更早", style=MUTED))
     return table
 
 
@@ -1092,8 +1116,8 @@ class RunScreen(Screen):
     # ctrl+b, not plain b: the ticker Input owns letter keys (BABA, BRK.B),
     # and priority so the shortcut still fires while it has focus.
     BINDINGS = [
-        Binding("escape", "back", "back"),
-        Binding("ctrl+b", "backtest", "backtest instead", priority=True),
+        Binding("escape", "back", "返回"),
+        Binding("ctrl+b", "backtest", "改为回测", priority=True),
     ]
 
     def __init__(self, spec: FundSpec) -> None:
@@ -1110,13 +1134,13 @@ class RunScreen(Screen):
         with ContentSwitcher(initial="run-ready", id="run-panes"):
             with Vertical(id="run-ready", classes="pane"):
                 yield Static("", id="run-hero")
-                yield Label("What should it trade today?", classes="q")
+                yield Label("今天交易哪些股票？", classes="q")
                 yield Input(
-                    placeholder=f"e.g. {', '.join(UNIVERSE_PRESETS[:5])}",
+                    placeholder=f"例如 {', '.join(UNIVERSE_PRESETS[:5])}",
                     id="run-tickers",
                 )
                 yield Static(
-                    Text("enter to run · ctrl+b to backtest instead · esc to go back",
+                    Text("回车运行 · ctrl+b 改为回测 · esc 返回",
                          style=MUTED),
                     classes="hint",
                 )
@@ -1135,10 +1159,11 @@ class RunScreen(Screen):
 
     def on_mount(self) -> None:
         spec = self._spec
-        staff = ", ".join(s.title for s in spec.strategies)
+        staff = ", ".join(_strategy_title(s) for s in spec.strategies)
         self.query_one("#run-hero", Static).update(Group(
             Text(spec.name, style=f"bold {BRIGHT}"),
-            Text(f"{staff}  ·  {spec.rebalance}  ·  ${spec.capital:,.0f}",
+            Text(f"{staff}  ·  {CADENCE_LABELS.get(spec.rebalance, spec.rebalance)}"
+                 f"  ·  ${spec.capital:,.0f}",
                  style=MUTED),
         ))
         tickers = self.query_one("#run-tickers", Input)
@@ -1168,7 +1193,7 @@ class RunScreen(Screen):
             self._universe = normalize_universe(
                 event.value.replace(",", " ").split())
         except ValueError:
-            self.notify("Enter at least one ticker.", severity="error")
+            self.notify("请输入至少一个股票代码。", severity="error")
             return
         def resume() -> None:
             if _demand_run_keys(self.app, resume):
@@ -1179,9 +1204,9 @@ class RunScreen(Screen):
         self._phase = "running"
         self.query_one("#run-panes", ContentSwitcher).current = "run-live"
         self.query_one("#run-phase", Static).update(Text.assemble(
-            ("Agents analyzing as of ", f"bold {BRIGHT}"),
+            ("智能体分析中（截至 ", f"bold {BRIGHT}"),
             (self._as_of, f"bold {RED}"),
-            ("  ·  today's data → today's target book", MUTED),
+            ("）  ·  今日数据 → 今日目标持仓", MUTED),
         ))
         self._desks = [_Desk(DISPLAY_NAMES.get(n, n))
                        for n in _agent_names(self._spec)]
@@ -1272,15 +1297,15 @@ class RunScreen(Screen):
         n_signals = sum(len(sr.signals) for sr in record.strategies)
         self.query_one("#report-head", Static).update(Text.assemble(
             (record.fund, f"bold {BRIGHT}"),
-            (f"  ·  {record.as_of}  ·  {n_signals} signals  ·  "
-             f"{len(record.orders)} orders", MUTED),
+            (f"  ·  {record.as_of}  ·  {n_signals} 个信号  ·  "
+             f"{len(record.orders)} 个订单", MUTED),
         ))
         self.query_one("#report-foot", Static).update(Group(
             _book_summary(record),
-            Text.assemble(("✓ ", f"bold {GREEN}"), ("Saved run to ", MUTED),
+            Text.assemble(("✓ ", f"bold {GREEN}"), ("运行结果已保存至 ", MUTED),
                           (str(path), MUTED)),
             Text.assemble(("▶ ", f"bold {GREEN}"),
-                          ("Backtest this fund over history", f"bold {GREEN}"),
+                          ("回测该基金的历史表现", f"bold {GREEN}"),
                           ("  ·  ctrl+b", MUTED)),
         ))
         self.refresh_bindings()  # phase changed: ctrl+b is offered again
@@ -1297,7 +1322,7 @@ class RunScreen(Screen):
         self._phase = "failed"
         self.query_one("#run-phase", Static).update(Text.assemble(
             ("✗ ", f"bold {RED}"), (f"{type(exc).__name__}: {exc}", RED)))
-        self.notify(str(exc), title="Run failed", severity="error")
+        self.notify(str(exc), title="运行失败", severity="error")
 
 
 class BuilderScreen(Screen):
@@ -1310,13 +1335,13 @@ class BuilderScreen(Screen):
     """
 
     STEP_IDS = ["step-name", "step-strategies", "step-capital", "step-cadence"]
-    STEP_TITLES = ["Name", "Strategies", "Capital", "Cadence"]
+    STEP_TITLES = ["名称", "策略", "资金", "频率"]
     CADENCES = ["daily", "weekly", "monthly"]
 
     BINDINGS = [
-        Binding("escape", "back", "back"),
-        Binding("enter", "confirm_list", "continue", priority=True),
-        Binding("a", "toggle_all", "toggle all"),
+        Binding("escape", "back", "返回"),
+        Binding("enter", "confirm_list", "继续", priority=True),
+        Binding("a", "toggle_all", "全部选择"),
     ]
 
     def __init__(self) -> None:
@@ -1333,20 +1358,20 @@ class BuilderScreen(Screen):
     def compose(self) -> ComposeResult:
         with Horizontal(id="builder"):
             with Vertical(id="rail"):
-                yield Static(Text("BUILD A FUND", style=MUTED), classes="rail-title")
+                yield Static(Text("构建基金", style=MUTED), classes="rail-title")
                 for i in range(len(self.STEP_IDS)):
                     yield Static("", id=f"rail-{i}", classes="rail-step")
             with ContentSwitcher(initial="step-name", id="panes"):
                 with Vertical(id="step-name", classes="pane"):
-                    yield Label("Name your fund", classes="q")
+                    yield Label("为基金命名", classes="q")
                     yield Input(value="ai-hedge-fund", id="name-input")
                 with Vertical(id="step-strategies", classes="pane"):
-                    yield Label("Select your strategies", classes="q")
+                    yield Label("选择策略", classes="q")
                     yield SelectionList(
                         Selection(
                             Text.assemble(
-                                ("Build your own      ", "bold"),
-                                ("pick individual agents", MUTED),
+                                ("自定义      ", "bold"),
+                                ("逐个选择智能体", MUTED),
                             ),
                             _CUSTOM,
                         ),
@@ -1357,12 +1382,12 @@ class BuilderScreen(Screen):
                         id="strategy-list",
                     )
                     yield Static(
-                        Text("space to toggle · a for all · enter to continue",
+                        Text("空格切换 · a 全部选择 · 回车继续",
                              style=MUTED),
                         classes="hint",
                     )
                 with Vertical(id="step-agents", classes="pane"):
-                    yield Label("Staff your desk", classes="q")
+                    yield Label("组建你的团队", classes="q")
                     yield SelectionList(
                         *(
                             Selection(self._agent_prompt(key, cls), key)
@@ -1371,36 +1396,36 @@ class BuilderScreen(Screen):
                         id="agent-list",
                     )
                     yield Static(
-                        Text("space to toggle · a for all · enter to continue",
+                        Text("空格切换 · a 全部选择 · 回车继续",
                              style=MUTED),
                         classes="hint",
                     )
                 with Vertical(id="step-capital", classes="pane"):
-                    yield Label("Starting capital ($)", classes="q")
+                    yield Label("初始资金（美元）", classes="q")
                     yield Input(
                         value=f"{DEFAULT_CAPITAL:.0f}", type="number",
                         id="capital-input",
                     )
                 with Vertical(id="step-cadence", classes="pane"):
-                    yield Label("Rebalance cadence", classes="q")
+                    yield Label("再平衡频率", classes="q")
                     yield OptionList(
                         Option(Text.assemble(
-                            ("daily     ", "bold"),
-                            ("news-speed — the most cycles", MUTED))),
+                            ("每日     ", "bold"),
+                            ("新闻速度——周期最多", MUTED))),
                         Option(Text.assemble(
-                            ("weekly    ", "bold"),
-                            ("the fundamentals default", MUTED))),
+                            ("每周    ", "bold"),
+                            ("基本面默认", MUTED))),
                         Option(Text.assemble(
-                            ("monthly   ", "bold"),
-                            ("slow-turn — the fewest LLM calls", MUTED))),
+                            ("每月   ", "bold"),
+                            ("慢周转——LLM 调用最少", MUTED))),
                         id="cadence-list",
                     )
                 with Vertical(id="step-done", classes="pane"):
                     yield Static("", id="done-summary")
                     yield OptionList(
-                        Option("▶  Run it as of today", id="go-run"),
+                        Option("▶  按今天运行", id="go-run"),
                         None,
-                        Option("Back to home", id="go-home"),
+                        Option("返回首页", id="go-home"),
                         id="done-menu",
                     )
         yield Footer()
@@ -1474,7 +1499,7 @@ class BuilderScreen(Screen):
         if self._pane() == "step-strategies":
             picked = list(self.query_one("#strategy-list", SelectionList).selected)
             if not picked:
-                self.notify("Select at least one strategy.", severity="error")
+                self.notify("请至少选择一个策略。", severity="error")
                 return
             self._state["strategies"] = [
                 self._library[i] for i in picked if i != _CUSTOM
@@ -1485,7 +1510,7 @@ class BuilderScreen(Screen):
         else:  # step-agents
             keys = list(self.query_one("#agent-list", SelectionList).selected)
             if not keys:
-                self.notify("Pick at least one agent.", severity="error")
+                self.notify("请至少选择一个智能体。", severity="error")
                 return
             self._state["strategies"] = self._state["strategies"] + [
                 StrategySpec(name="custom", models=[{"name": k} for k in keys])
@@ -1497,7 +1522,7 @@ class BuilderScreen(Screen):
         try:
             self._state["capital"] = float(event.value or DEFAULT_CAPITAL)
         except ValueError:
-            self.notify("Enter a number.", severity="error")
+            self.notify("请输入数字。", severity="error")
             return
         self._goto("step-cadence")
 
@@ -1519,21 +1544,22 @@ class BuilderScreen(Screen):
         )
         FUNDS_DIR.mkdir(exist_ok=True)
         path = FUNDS_DIR / f"{spec.name}.yaml"
-        path.write_text(yaml.safe_dump(spec.model_dump(), sort_keys=False))
+        path.write_text(yaml.safe_dump(spec.model_dump(), sort_keys=False), encoding="utf-8")
         self._built = (spec, path)
 
-        staff = ", ".join(s.title for s in self._state["strategies"])
+        staff = ", ".join(_strategy_title(s) for s in self._state["strategies"])
         self.query_one("#done-summary", Static).update(Group(
-            Text.assemble(("✓ ", f"bold {GREEN}"), ("Saved fund to ", TEXT),
+            Text.assemble(("✓ ", f"bold {GREEN}"), ("基金已保存至 ", TEXT),
                           (str(path), f"bold {BRIGHT}")),
             Text(""),
             Text.assemble(
                 (spec.name, f"bold {BRIGHT}"),
-                (f"  ·  {staff}  ·  ${spec.capital:,.0f}  ·  {spec.rebalance}",
+                (f"  ·  {staff}  ·  ${spec.capital:,.0f}  ·  "
+                 f"{CADENCE_LABELS.get(spec.rebalance, spec.rebalance)}",
                  MUTED),
             ),
             Text(""),
-            Text("Pick the tickers when you run it — a fund carries no watchlist.",
+            Text("运行时再选择股票——基金本身不带自选列表。",
                  style=MUTED),
         ))
         self._goto("step-done")
@@ -1554,7 +1580,8 @@ class BuilderScreen(Screen):
             1: self._short_strategies(),
             2: (f"${self._state['capital']:,.0f}"
                 if "capital" in self._state else None),
-            3: self._state.get("rebalance"),
+            3: (CADENCE_LABELS.get(self._state["rebalance"], self._state["rebalance"])
+                if "rebalance" in self._state else None),
         }
         active = self._step if self._pane() != "step-done" else -1
         for i, title in enumerate(self.STEP_TITLES):
@@ -1575,7 +1602,7 @@ class BuilderScreen(Screen):
         strategies = self._state.get("strategies")
         if not strategies or self._pane() == "step-agents":
             return None
-        names = ", ".join(s.title for s in strategies[:2])
+        names = ", ".join(_strategy_title(s) for s in strategies[:2])
         return names + (", …" if len(strategies) > 2 else "")
 
     @staticmethod
@@ -1583,13 +1610,14 @@ class BuilderScreen(Screen):
         staff = ", ".join(
             _SHORT_NAMES.get(m.name, m.name) for m in strategy.models
         )
-        return Text.assemble((f"{strategy.title:<20}", "bold"), (staff, MUTED))
+        return Text.assemble((_strategy_title(strategy), "bold"),
+                             ("   " + staff, MUTED))
 
     @staticmethod
     def _agent_prompt(key: str, cls: type) -> Text:
         name = DISPLAY_NAMES.get(key, key)
-        tag = "" if issubclass(cls, LLMAgent) else "  quant"
-        return Text.assemble((f"{name:<24}", "bold"), (tag, MUTED))
+        tag = "" if issubclass(cls, LLMAgent) else "  量化"
+        return Text.assemble((f"{name:<28}", "bold"), (tag, MUTED))
 
 
 class BacktestScreen(Screen):
@@ -1600,7 +1628,7 @@ class BacktestScreen(Screen):
     afterward is the source of truth.
     """
 
-    BINDINGS = [Binding("escape", "back", "back")]
+    BINDINGS = [Binding("escape", "back", "返回")]
 
     def __init__(self, spec: FundSpec | None = None) -> None:
         super().__init__()
@@ -1619,19 +1647,19 @@ class BacktestScreen(Screen):
     def compose(self) -> ComposeResult:
         with ContentSwitcher(initial="bt-pick", id="bt-panes"):
             with Vertical(id="bt-pick", classes="pane"):
-                yield Label("Which fund?", classes="q")
+                yield Label("选择哪个基金？", classes="q")
                 yield OptionList(id="fund-list")
                 yield Static("", id="no-funds", classes="hint")
             with Vertical(id="bt-dates", classes="pane"):
-                yield Label("Time-travel window", classes="q")
-                yield Static(Text("tickers to trade", style=MUTED))
+                yield Label("历史回测窗口", classes="q")
+                yield Static(Text("交易股票", style=MUTED))
                 yield Input(
-                    placeholder=f"e.g. {', '.join(UNIVERSE_PRESETS[:5])}",
+                    placeholder=f"例如 {', '.join(UNIVERSE_PRESETS[:5])}",
                     id="bt-tickers",
                 )
-                yield Static(Text("from (YYYY-MM-DD)", style=MUTED))
+                yield Static(Text("起始（YYYY-MM-DD）", style=MUTED))
                 yield Input(id="start-input")
-                yield Static(Text("to (YYYY-MM-DD)", style=MUTED))
+                yield Static(Text("结束（YYYY-MM-DD）", style=MUTED))
                 yield Input(id="end-input")
             with VerticalScroll(id="bt-run", classes="pane"):
                 yield Static("", id="phase-line")
@@ -1652,7 +1680,7 @@ class BacktestScreen(Screen):
                 yield Static("", id="cycle-line")
                 yield Static("", id="result-summary", classes="hidden")
                 yield OptionList(
-                    Option("Back to home", id="bt-home"),
+                    Option("返回首页", id="bt-home"),
                     id="bt-done-menu",
                     classes="hidden",
                 )
@@ -1667,7 +1695,7 @@ class BacktestScreen(Screen):
         fund_list = self.query_one("#fund-list", OptionList)
         if not self._specs:
             self.query_one("#no-funds", Static).update(
-                Text("No funds yet — build one first. Esc to go back.",
+                Text("还没有基金——请先构建一个。esc 返回。",
                      style=MUTED)
             )
             return
@@ -1731,13 +1759,13 @@ class BacktestScreen(Screen):
                 self.notify(ok, severity="error")
                 return
         if end <= start:
-            self.notify(f"End must be after {start}.", severity="error")
+            self.notify(f"结束日期必须晚于 {start}。", severity="error")
             return
         try:
             universe = normalize_universe(
                 self.query_one("#bt-tickers", Input).value.replace(",", " ").split())
         except ValueError:
-            self.notify("Enter at least one ticker.", severity="error")
+            self.notify("请输入至少一个股票代码。", severity="error")
             self.query_one("#bt-tickers", Input).focus()
             return
         assert self._spec is not None
@@ -1752,7 +1780,7 @@ class BacktestScreen(Screen):
         self._phase = "run"
         self.query_one("#bt-panes", ContentSwitcher).current = "bt-run"
         self.query_one("#phase-line", Static).update(
-            Text("Building the trading grid…", style=MUTED)
+            Text("构建交易网格…", style=MUTED)
         )
         self._run(self._spec, start, end, universe)
 
@@ -1776,8 +1804,8 @@ class BacktestScreen(Screen):
                       if start <= b.time[:10] <= end}
             if not closes:
                 raise ValueError(
-                    f"no {spec.benchmark} bars in [{start}, {end}] — "
-                    "cannot build the trading grid"
+                    f"[{start}, {end}] 区间内没有 {spec.benchmark} 行情数据——"
+                    "无法构建交易网格"
                 )
             grid = rebalance_grid(sorted(closes), spec.rebalance)
 
@@ -1879,9 +1907,10 @@ class BacktestScreen(Screen):
     def _begin_warm(self, spec: FundSpec, universe: list[str],
                     n_grid: int) -> None:
         self.query_one("#phase-line", Static).update(Text.assemble(
-            ("Loading market data", f"bold {BRIGHT}"),
-            (f"  ·  {len(universe)} stocks × {n_grid} "
-             f"{spec.rebalance} cycles", MUTED),
+            ("加载市场数据", f"bold {BRIGHT}"),
+            (f"  ·  {len(universe)} 只股票 × {n_grid} 个"
+             f"{CADENCE_LABELS.get(spec.rebalance, spec.rebalance)}周期",
+             MUTED),
         ))
         bar = self.query_one("#warm-progress", ProgressBar)
         bar.update(total=len(universe) * n_grid, progress=0)
@@ -1889,8 +1918,8 @@ class BacktestScreen(Screen):
 
     def _begin_agents(self, spec: FundSpec) -> None:
         self.query_one("#phase-line", Static).update(Text.assemble(
-            ("Agents replaying history", f"bold {BRIGHT}"),
-            ("  ·  point-in-time: each date sees only what was filed by then",
+            ("智能体重放历史", f"bold {BRIGHT}"),
+            ("  ·  时点一致：每个日期只能看到当时已归档的数据",
              MUTED),
         ))
         self._roster_order = [
@@ -1916,17 +1945,17 @@ class BacktestScreen(Screen):
         self._n_cycles = n_cycles
         self._tape = []
         self.query_one("#phase-line", Static).update(Text.assemble(
-            ("Replaying the fund", f"bold {BRIGHT}"),
-            ("  ·  one run_cycle per rebalance date, off the warm cache",
+            ("回放基金", f"bold {BRIGHT}"),
+            ("  ·  每个再平衡日运行一个周期，使用预热缓存",
              MUTED),
         ))
         box_widget = self.query_one("#curve-box", Vertical)
-        box_widget.border_title = "equity curve"
+        box_widget.border_title = "净值曲线"
         box_widget.border_subtitle = (
-            f"[{GREEN}]██[/] fund   [{CYAN}]──[/] {spec.benchmark}"
+            f"[{GREEN}]██[/] 基金   [{CYAN}]──[/] {spec.benchmark}"
         )
         tape_box = self.query_one("#tape-box", Vertical)
-        tape_box.border_title = "trades (newest first)"
+        tape_box.border_title = "成交记录（最新在上）"
         self.query_one("#stats", Horizontal).remove_class("hidden")
         box_widget.remove_class("hidden")
         tape_box.remove_class("hidden")
@@ -1977,7 +2006,7 @@ class BacktestScreen(Screen):
                 (record.as_of, fill, record.positions.get(fill.ticker, 0)))
         self.query_one("#tape", Static).update(_tape_table(self._tape))
         self.query_one("#cycle-line", Static).update(Text(
-            f"cycle {len(self._nav)}/{self._n_cycles} · {self._dates[-1]}",
+            f"周期 {len(self._nav)}/{self._n_cycles} · {self._dates[-1]}",
             style=MUTED,
         ))
 
@@ -1994,21 +2023,21 @@ class BacktestScreen(Screen):
 
         assert self._spec is not None
         self.query_one("#stat-nav", Static).update(
-            tile("PORTFOLIO", f"${nav:,.0f}", BRIGHT))
+            tile("净值", f"${nav:,.0f}", BRIGHT))
         self.query_one("#stat-return", Static).update(
-            tile("RETURN", f"{fund_return:+.2%}",
+            tile("回报", f"{fund_return:+.2%}",
                  GREEN if fund_return >= 0 else RED))
         self.query_one("#stat-bench", Static).update(
             tile(self._spec.benchmark, f"{benchmark_return:+.2%}",
                  GREEN if benchmark_return >= 0 else RED))
         self.query_one("#stat-excess", Static).update(
-            tile("EXCESS", f"{excess:+.2%}",
+            tile("超额", f"{excess:+.2%}",
                  GREEN if excess >= 0 else RED))
         self.query_one("#stat-sharpe", Static).update(
-            tile("SHARPE", f"{sharpe:.2f}",
+            tile("夏普", f"{sharpe:.2f}",
                  GREEN if sharpe > 1 else "yellow" if sharpe > 0 else RED))
         self.query_one("#stat-dd", Static).update(
-            tile("MAX DRAWDOWN", f"{max_dd:.2%}", RED))
+            tile("最大回撤", f"{max_dd:.2%}", RED))
 
     def _finish(self, result: FundBacktestResult, path: Path) -> None:
         self._phase = "done"
@@ -2018,11 +2047,12 @@ class BacktestScreen(Screen):
         self.query_one("#warm-progress", ProgressBar).add_class("hidden")
         self.query_one("#roster", Static).add_class("hidden")
         self.query_one("#phase-line", Static).update(Text.assemble(
-            ("BACKTEST RESULTS  ", f"bold {BRIGHT}"),
+            ("回测结果  ", f"bold {BRIGHT}"),
             (result.fund, f"bold {CYAN}"),
-            (f"  {result.start} → {result.end} · {result.rebalance} "
-             f"rebalance · {m.n_cycles} cycles · {m.n_orders} orders · "
-             f"{m.annualized_return_pct:+.1%} annualized",
+            (f"  {result.start} → {result.end} · "
+             f"{CADENCE_LABELS.get(result.rebalance, result.rebalance)}再平衡"
+             f" · {m.n_cycles} 个周期 · {m.n_orders} 个订单 · "
+             f"{m.annualized_return_pct:+.1%} 年化",
              MUTED),
         ))
         self._update_stats(
@@ -2032,7 +2062,7 @@ class BacktestScreen(Screen):
         )
         self.query_one("#result-summary", Static).update(
             Text.assemble(("✓ ", f"bold {GREEN}"),
-                          ("Saved backtest record to ", TEXT),
+                          ("回测记录已保存至 ", TEXT),
                           (str(path), f"bold {BRIGHT}")))
         self.query_one("#result-summary", Static).remove_class("hidden")
         menu = self.query_one("#bt-done-menu", OptionList)
@@ -2045,7 +2075,7 @@ class BacktestScreen(Screen):
             ("✗ ", f"bold {RED}"),
             (f"{type(exc).__name__}: {exc}", RED),
         ))
-        self.notify(str(exc), title="Backtest failed", severity="error")
+        self.notify(str(exc), title="回测失败", severity="error")
 
 
 # Reused rich renderables (the equity curve, the roster) speak in ANSI color
@@ -2080,7 +2110,7 @@ _ANSI_THEME = TerminalTheme(
 class HedgeFundApp(App):
     """The v2 terminal app. One screen stack: Home → Builder / Backtest."""
 
-    TITLE = "AI Hedge Fund"
+    TITLE = "AI 对冲基金"
     SUB_TITLE = f"v{VERSION}"
     CSS_PATH = "app.tcss"
     ansi_theme_dark = _ANSI_THEME
@@ -2089,7 +2119,7 @@ class HedgeFundApp(App):
     # focused Input, else just hints how to quit). Users reflexively hit
     # ctrl+c to leave, so restore it: priority=True so it fires before the
     # system binding AND any focused widget, quitting from anywhere.
-    BINDINGS = [Binding("ctrl+c", "quit", "quit", priority=True, show=False)]
+    BINDINGS = [Binding("ctrl+c", "quit", "退出", priority=True, show=False)]
 
     def on_mount(self) -> None:
         # Saved keys become environment variables before any screen builds an

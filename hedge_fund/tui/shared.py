@@ -34,23 +34,49 @@ FUNDS_DIR = MANDATES_DIR
 UNIVERSE_PRESETS = ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN",
                     "META", "TSLA", "JPM", "UNH", "XOM"]
 
+# The palette, mirrored from app.tcss (rich styles can't read CSS variables).
+GREEN = "#2bd97c"
+CYAN = "#22d3ee"
+RED = "#f87171"
+TEXT = "#d9e6e0"
+BRIGHT = "#f2f7f4"
+MUTED = "#5f7268"
+
+# Display labels for the rebalance cadence values the engine validates.
+CADENCE_LABELS = {"daily": "每日", "weekly": "每周", "monthly": "每月"}
+
 DISPLAY_NAMES = {
-    "buffett": "Warren Buffett",
-    "munger": "Charlie Munger",
-    "graham": "Benjamin Graham",
-    "lynch": "Peter Lynch",
-    "druckenmiller": "Stanley Druckenmiller",
-    "pead": "post-earnings drift",
+    "buffett": "巴菲特 Warren Buffett",
+    "munger": "芒格 Charlie Munger",
+    "graham": "格雷厄姆 Benjamin Graham",
+    "lynch": "林奇 Peter Lynch",
+    "druckenmiller": "德鲁肯米勒 Stanley Druckenmiller",
+    "pead": "PEAD 盈利漂移",
 }
 
 _SHORT_NAMES = {
-    "buffett": "Buffett",
-    "munger": "Munger",
-    "graham": "Graham",
-    "lynch": "Lynch",
-    "druckenmiller": "Druckenmiller",
+    "buffett": "巴菲特",
+    "munger": "芒格",
+    "graham": "格雷厄姆",
+    "lynch": "林奇",
+    "druckenmiller": "德鲁肯米勒",
     "pead": "PEAD",
 }
+
+# Strategy library titles, bilingual: 中文（English）.
+_STRATEGY_CN = {
+    "Deep Value": "深度价值",
+    "Earnings Drift": "盈利漂移",
+    "Fundamental L/S": "基本面多空",
+    "Inflections": "拐点机会",
+}
+
+
+def _strategy_title(strategy: StrategySpec) -> str:
+    """A strategy's display title, bilingual when a mapping exists."""
+    title = strategy.title
+    cn = _STRATEGY_CN.get(title)
+    return f"{cn}（{title}）" if cn else title
 
 # The LLM the investor agents reason with. Picked once, upfront; make_llm()
 # reads HEDGE_FUND_LLM_MODEL (hedge_fund/llm/client.py) and routes to the right provider, so
@@ -77,15 +103,15 @@ def _valid_date(text: str):
         _date.fromisoformat(text.strip())
         return True
     except ValueError:
-        return "Use YYYY-MM-DD."
+        return "请使用 YYYY-MM-DD 格式。"
 
 
 def _fund_label(spec: FundSpec) -> str:
     """One aligned line per fund: name, staff, cadence."""
-    staff = ", ".join(s.title for s in spec.strategies[:3])
+    staff = ", ".join(_strategy_title(s) for s in spec.strategies[:3])
     if len(spec.strategies) > 3:
         staff += ", …"
-    return f"{spec.name:<18} {staff} · {spec.rebalance}"
+    return f"{spec.name:<18} {staff} · {CADENCE_LABELS.get(spec.rebalance, spec.rebalance)}"
 
 
 def _agent_names(spec: FundSpec) -> list[str]:
