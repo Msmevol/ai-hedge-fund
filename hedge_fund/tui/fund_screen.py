@@ -152,44 +152,6 @@ class FundPickerScreen(Screen):
         finally:
             client.close()
 
-
-def _fuse(llm: FundVerdict, quant) -> FundVerdict:
-    """Fuse the LLM verdict and the quant score into one report verdict.
-
-    Same direction → that signal, confidence = the stronger of the two.
-    Direct clash (bullish vs bearish) → neutral at average confidence.
-    A quant abstention (insufficient history) or an LLM abstention
-    (unparseable/LLM failure) falls back to whichever side has a view.
-    """
-    if quant.signal == "neutral" and quant.confidence == 0.0:
-        return llm
-    if llm.confidence == 0.0 and "无法分析" in llm.reasoning:
-        return FundVerdict(
-            code=llm.code, name=llm.name, signal=quant.signal,
-            confidence=quant.confidence,
-            reasoning=f"【量化】{quant.reasoning}\n【LLM】{llm.reasoning}")
-    if llm.signal == quant.signal:
-        return FundVerdict(
-            code=llm.code, name=llm.name, signal=llm.signal,
-            confidence=max(llm.confidence, quant.confidence),
-            reasoning=f"【量化】{quant.reasoning}\n【LLM】{llm.reasoning}")
-    if {llm.signal, quant.signal} == {"bullish", "bearish"}:
-        return FundVerdict(
-            code=llm.code, name=llm.name, signal="neutral",
-            confidence=round((llm.confidence + quant.confidence) / 2, 1),
-            reasoning=f"【量化】{quant.reasoning}\n【LLM】{llm.reasoning}（与量化分歧，按观望处理）")
-    # exactly one side has a view — take the side that has one
-    viewed = llm if llm.signal != "neutral" else None
-    viewed = viewed or (quant if quant.signal != "neutral" else None)
-    if viewed is None:
-        return llm
-    if viewed is quant:
-        return FundVerdict(
-            code=llm.code, name=llm.name, signal=quant.signal,
-            confidence=quant.confidence,
-            reasoning=f"【量化】{quant.reasoning}\n【LLM】{llm.reasoning}")
-    return llm
-
     # ------------------------------------------------------------------
     # Report
     # ------------------------------------------------------------------
@@ -256,3 +218,41 @@ def _fuse(llm: FundVerdict, quant) -> FundVerdict:
         self.query_one("#picker-status", Static).update(
             Text.assemble(("✗ ", f"bold {RED}"), (message, RED)))
         self.notify(message, title="基金选购失败", severity="error")
+
+
+def _fuse(llm: FundVerdict, quant) -> FundVerdict:
+    """Fuse the LLM verdict and the quant score into one report verdict.
+
+    Same direction → that signal, confidence = the stronger of the two.
+    Direct clash (bullish vs bearish) → neutral at average confidence.
+    A quant abstention (insufficient history) or an LLM abstention
+    (unparseable/LLM failure) falls back to whichever side has a view.
+    """
+    if quant.signal == "neutral" and quant.confidence == 0.0:
+        return llm
+    if llm.confidence == 0.0 and "无法分析" in llm.reasoning:
+        return FundVerdict(
+            code=llm.code, name=llm.name, signal=quant.signal,
+            confidence=quant.confidence,
+            reasoning=f"【量化】{quant.reasoning}\n【LLM】{llm.reasoning}")
+    if llm.signal == quant.signal:
+        return FundVerdict(
+            code=llm.code, name=llm.name, signal=llm.signal,
+            confidence=max(llm.confidence, quant.confidence),
+            reasoning=f"【量化】{quant.reasoning}\n【LLM】{llm.reasoning}")
+    if {llm.signal, quant.signal} == {"bullish", "bearish"}:
+        return FundVerdict(
+            code=llm.code, name=llm.name, signal="neutral",
+            confidence=round((llm.confidence + quant.confidence) / 2, 1),
+            reasoning=f"【量化】{quant.reasoning}\n【LLM】{llm.reasoning}（与量化分歧，按观望处理）")
+    # exactly one side has a view — take the side that has one
+    viewed = llm if llm.signal != "neutral" else None
+    viewed = viewed or (quant if quant.signal != "neutral" else None)
+    if viewed is None:
+        return llm
+    if viewed is quant:
+        return FundVerdict(
+            code=llm.code, name=llm.name, signal=quant.signal,
+            confidence=quant.confidence,
+            reasoning=f"【量化】{quant.reasoning}\n【LLM】{llm.reasoning}")
+    return llm
