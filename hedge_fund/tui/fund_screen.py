@@ -19,15 +19,11 @@ from textual.screen import Screen
 from textual.widgets import Footer, OptionList, Static
 from textual.widgets.option_list import Option
 
-from hedge_fund.data.fund_client import FundClient, THEMES
+from hedge_fund.data.fund_client import THEMES
 from hedge_fund.fund import FundSnapshot
-from hedge_fund.signals import (
-    FundAnalyst,
-    FundQuantModel,
-    FundVerdict,
-    _sort_verdicts,
-)
+from hedge_fund.signals import FundVerdict
 from hedge_fund.tui.shared import BRIGHT, GREEN, MUTED, RED, TEXT
+from hedge_fund.web.analysis import _snapshot_from_dict, run_fund_analysis
 
 _MARK_LABEL = {"buy": "推荐买入", "hold": "可观望", "avoid": "不建议"}
 _MARK_STYLE = {"buy": f"bold {GREEN}", "hold": "bold #facc15", "avoid": f"bold {RED}"}
@@ -94,63 +90,36 @@ class FundPickerScreen(Screen):
         self._phase = "running"
         self._verdicts = []
         self._snapshots = {}
+        self._theme = theme
         self.query_one("#picker-status", Static).update(
             Text.assemble(("⏳ ", "bold #facc15"),
                           (f"正在拉取「{theme}」主题基金池…", MUTED)))
         self.query_one("#picker-report", OptionList).clear_options()
         self.query_one("#picker-detail-body", Static).update("")
         try:
-            pool = self._pool(theme)
-            if not pool:
-                app.call_from_thread(self._fail, f"「{theme}」主题下没有符合条件的基金。")
-                return
-            app.call_from_thread(
-                self._set_status,
-                f"候选池 {len(pool)} 只（规模≥5亿、成立≥3年），正在逐个分析…")
-            verdicts: list[FundVerdict] = []
-            done_snaps: dict[str, FundSnapshot] = {}
-            done = 0
-            with ThreadPoolExecutor(max_workers=min(3, len(pool))) as ex:
-                futures = {ex.submit(self._one, info): info for info in pool}
-                for future in as_completed(futures):
-                    done += 1
-                    info = futures[future]
-                    try:
-                        verdict, snap = future.result()
-                        verdicts.append(verdict)
-                        done_snaps[info.code] = snap
-                    except Exception as exc:  # per-fund failure: skip, label it
-                        verdicts.append(FundVerdict(
-                            code=info.code, name=info.name, signal="neutral",
-                            confidence=0.0,
-                            reasoning=f"无法分析（{type(exc).__name__}）"))
-                    app.call_from_thread(self._set_status,
-                                         f"已分析 {done}/{len(pool)} 只…")
-            self._snapshots = done_snaps
-            app.call_from_thread(self._show_report, theme, verdicts)
+            run_fund_analysis(
+                theme,
+                lambda ev: app.call_from_thread(self._on_event, ev))
         except Exception as exc:  # pool-level failure: fail loud in the UI
             app.call_from_thread(self._fail, f"{type(exc).__name__}: {exc}")
 
-    def _pool(self, theme: str) -> list:
-        client = FundClient()
-        try:
-            return client.list_funds(theme)
-        finally:
-            client.close()
-
-    def _one(self, info) -> tuple[FundVerdict, FundSnapshot]:
-        """One fund end to end, in its own thread: snapshot + quant + LLM,
-        fused into a single verdict (own client, own analyst)."""
-        client = FundClient()
-        try:
-            snapshot = client.fetch_snapshot(info)
-            qi = client.fetch_quant_input(info.code)
-            quant = FundQuantModel().score(snapshot, qi.fund_monthly,
-                                           qi.bench_monthly)
-            verdict = _fuse(FundAnalyst().analyze(snapshot), quant)
-            return verdict, snapshot
-        finally:
-            client.close()
+    def _on_event(self, event: dict) -> None:
+        kind = event.get("type")
+        if kind == "pool":
+            self._set_status(
+                f"候选池 {event['count']} 只（规模≥5亿、成立≥3年），正在逐个分析…")
+        elif kind == "fund_done":
+            self._verdicts.append(FundVerdict(
+                code=event["code"], name=event["name"], signal=event["signal"],
+                confidence=event["confidence"], reasoning=event["reasoning"]))
+            snap = event.get("snapshot")
+            if snap:
+                self._snapshots[event["code"]] = _snapshot_from_dict(snap)
+            self._set_status(f"已分析 {event['done']}/{event['total']} 只…")
+        elif kind == "done":
+            by_code = {v.code: v for v in self._verdicts}
+            ranked = [by_code[item["code"]] for item in event["order"]]
+            self._show_report(self._theme, ranked)
 
     # ------------------------------------------------------------------
     # Report

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>基金选购 · AI 对冲基金</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">基</span>
+    <div>
+      <h1>基金选购</h1>
+      <p class="tagline">国内场外公募基金 · 选主题，让分析师逐个打分</p>
+    </div>
+  </div>
+  <div id="conn" class="conn ok" title="与本地分析服务连接状态"></div>
+</header>
+
+<main>
+  <section id="step-theme" class="panel">
+    <h2>① 选择主题</h2>
+    <div id="theme-grid" class="grid"></div>
+  </section>
+
+  <section id="step-progress" class="panel hidden">
+    <h2>② 分析进度</h2>
+    <div id="status-line" class="status"></div>
+    <div id="progress-list" class="progress"></div>
+  </section>
+
+  <section id="step-report" class="panel hidden">
+    <h2>③ 分析报告</h2>
+    <div id="report-list" class="report"></div>
+  </section>
+</main>
+
+<aside id="detail" class="detail hidden">
+  <button id="detail-close" class="close" title="关闭">×</button>
+  <div id="detail-body"></div>
+</aside>
+
+<footer class="foot">
+  <span>分析仅基于公开数据 + 量化模型 + LLM 推理，不构成投资建议</span>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>
