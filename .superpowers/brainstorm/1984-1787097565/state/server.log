@@ -1,3 +1,0 @@
-{"type":"owner-pid-invalid","pid":1984,"reason":"dead at startup"}
-{"type":"server-started","port":53869,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:53869","screen_dir":"C:\\Users\\maxiang\\Desktop\\jijing\\ai-hedge-fund\\.superpowers\\brainstorm\\1984-1787097565\\content","state_dir":"C:\\Users\\maxiang\\Desktop\\jijing\\ai-hedge-fund\\.superpowers\\brainstorm\\1984-1787097565\\state"}
-{"type":"server-stopped","reason":"idle timeout"}
