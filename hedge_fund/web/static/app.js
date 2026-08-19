@@ -56,7 +56,9 @@ function ensureStartBtn() {
 async function start() {
   if (!theme || es) return;
   resetView();
-  $("status-line").textContent = `正在拉取「${theme}」主题基金池…`;
+  $("step-progress").classList.remove("hidden");
+  $("status-line").textContent = `已提交「${theme}」，正在拉取基金池…`;
+  $("btn-start").disabled = true;
   const res = await fetch("/api/analyze", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -66,6 +68,7 @@ async function start() {
     const err = await res.json().catch(() => ({}));
     $("status-line").textContent = `启动失败：${err.detail || res.status}`;
     setConn(false);
+    $("btn-start").disabled = false;
     return;
   }
   const { task_id } = await res.json();
@@ -84,6 +87,9 @@ function onEvent(e) {
       $("status-line").textContent =
         `候选池 ${ev.count} 只（规模≥5亿、成立≥3年），正在逐个分析…`;
       break;
+    case "fund_start":
+      addPendingRow(ev);
+      break;
     case "fund_done":
       addFundRow(ev);
       break;
@@ -100,7 +106,7 @@ function onEvent(e) {
   }
 }
 
-function addFundRow(ev) {
+function addPendingRow(ev) {
   const row = document.createElement("div");
   row.className = "fund-row pending";
   row.dataset.code = ev.code;
@@ -110,6 +116,22 @@ function addFundRow(ev) {
     <span class="name">${escapeHtml(ev.name)}</span>
     <span class="mark">分析中…</span>`;
   $("progress-list").appendChild(row);
+}
+
+function addFundRow(ev) {
+  const existing = document.querySelector(
+    `.fund-row[data-code="${ev.code}"]`);
+  const row = existing || document.createElement("div");
+  row.className = "fund-row";
+  row.dataset.code = ev.code;
+  const [label, cls] = MARK[ev.signal] || MARK.neutral;
+  row.innerHTML = `
+    <span class="st">✓</span>
+    <span class="code">${ev.code}</span>
+    <span class="name">${escapeHtml(ev.name)}</span>
+    <span class="mark ${cls}">${label}</span>
+    <span class="conf ${cls}">${Math.round(ev.confidence)}%</span>`;
+  if (!existing) $("progress-list").appendChild(row);
   rows.set(ev.code, { row, data: ev });
   fundsByCode.set(ev.code, ev);
   $("status-line").textContent = `已分析 ${ev.done}/${ev.total} 只…`;

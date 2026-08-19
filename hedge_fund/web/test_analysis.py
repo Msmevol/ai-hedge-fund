@@ -77,10 +77,14 @@ def test_event_sequence(env):
     events = []
     analysis.run_fund_analysis("科技", events.append)
     kinds = [e["type"] for e in events]
-    assert kinds == ["pool", "fund_done", "fund_done", "done"]
+    assert kinds == ["pool", "fund_start", "fund_start",
+                     "fund_done", "fund_done", "done"]
     pool = events[0]
     assert pool["count"] == 2 and pool["theme"] == "科技"
     assert {f["code"] for f in pool["funds"]} == {"010013", "010236"}
+    starts = [e for e in events if e["type"] == "fund_start"]
+    assert {e["code"] for e in starts} == {"010013", "010236"}
+    assert all(e["name"] for e in starts)
     done_events = [e for e in events if e["type"] == "fund_done"]
     for ev in done_events:
         assert ev["signal"] in ("bullish", "neutral", "bearish")

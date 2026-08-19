@@ -61,6 +61,9 @@ def run_fund_analysis(theme: str, on_event) -> None:
     done = 0
     with ThreadPoolExecutor(max_workers=min(_MAX_WORKERS, len(pool))) as ex:
         futures = {ex.submit(_one, info): info for info in pool}
+        for info in pool:
+            on_event({"type": "fund_start", "code": info.code,
+                      "name": info.name})
         for future in as_completed(futures):
             done += 1
             info = futures[future]
