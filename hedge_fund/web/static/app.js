@@ -18,6 +18,7 @@ let order = [];
 const fundsByCode = new Map();
 
 async function init() {
+  startClock();
   const res = await fetch("/api/themes");
   const { themes } = await res.json();
   const grid = $("theme-grid");
@@ -29,6 +30,25 @@ async function init() {
     grid.appendChild(card);
   }
   $("detail-close").onclick = closeDetail;
+}
+
+function startClock() {
+  const el = $("clock");
+  if (!el) return;
+  const tick = () => {
+    const now = new Date();
+    el.textContent = now.toLocaleTimeString("zh-CN", { hour12: false });
+  };
+  tick();
+  setInterval(tick, 1000);
+}
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  } else {
+    document.exitFullscreen();
+  }
 }
 
 function selectTheme(t, card) {
