@@ -1,6 +1,5 @@
-/* 基金选购 · 单页前端 —— 无依赖原生 JS。
- * 排序字段由后端 done 事件的 order 提供（与 TUI 共用 _sort_verdicts），
- * 前端只按序渲染，不重复实现排序。 */
+/* Fund Lab — 单页前端 · Trading Terminal Fintech
+ * 无依赖原生 JS，SSE 实时事件流 */
 
 "use strict";
 
@@ -8,14 +7,14 @@ const $ = (id) => document.getElementById(id);
 const MARK = { bullish: ["推荐买入", "mark-buy"],
                neutral: ["可观望", "mark-hold"],
                bearish: ["不建议", "mark-avoid"] };
-const PCT = (v, signed) => v == null ? "数据缺失"
+const PCT = (v, signed) => v == null ? "—"
   : (signed && v > 0 ? "+" : "") + (v * 100).toFixed(1) + "%";
 
 let theme = null;
 let taskId = null;
 let es = null;
-let rows = new Map();      // code -> {rowEl, data}
-let order = [];            // [{code, rank, signal, label}]
+let rows = new Map();
+let order = [];
 const fundsByCode = new Map();
 
 async function init() {
@@ -57,7 +56,7 @@ async function start() {
   if (!theme || es) return;
   resetView();
   $("step-progress").classList.remove("hidden");
-  $("status-line").textContent = `已提交「${theme}」，正在拉取基金池…`;
+  $("status-text").textContent = `已提交「${theme}」，正在拉取基金池…`;
   $("btn-start").disabled = true;
   const res = await fetch("/api/analyze", {
     method: "POST",
@@ -66,7 +65,7 @@ async function start() {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    $("status-line").textContent = `启动失败：${err.detail || res.status}`;
+    $("status-text").textContent = `启动失败：${err.detail || res.status}`;
     setConn(false);
     $("btn-start").disabled = false;
     return;
@@ -84,8 +83,8 @@ function onEvent(e) {
   switch (ev.type) {
     case "pool":
       $("step-progress").classList.remove("hidden");
-      $("status-line").textContent =
-        `候选池 ${ev.count} 只（规模≥5亿、成立≥3年），正在逐个分析…`;
+      $("status-text").textContent =
+        `候选池 ${ev.count} 只（规模≥5亿 · 成立≥3年），逐个分析中…`;
       break;
     case "fund_start":
       addPendingRow(ev);
@@ -97,7 +96,7 @@ function onEvent(e) {
       finish(ev.order);
       break;
     case "error":
-      $("status-line").textContent = "分析失败：" + ev.message;
+      $("status-text").textContent = "分析失败：" + ev.message;
       setConn(false);
       es.close(); es = null;
       break;
@@ -111,7 +110,7 @@ function addPendingRow(ev) {
   row.className = "fund-row pending";
   row.dataset.code = ev.code;
   row.innerHTML = `
-    <span class="st">⏳</span>
+    <span class="st">–</span>
     <span class="code">${ev.code}</span>
     <span class="name">${escapeHtml(ev.name)}</span>
     <span class="mark">分析中…</span>`;
@@ -119,22 +118,22 @@ function addPendingRow(ev) {
 }
 
 function addFundRow(ev) {
-  const existing = document.querySelector(
-    `.fund-row[data-code="${ev.code}"]`);
+  const existing = document.querySelector(`.fund-row[data-code="${ev.code}"]`);
   const row = existing || document.createElement("div");
   row.className = "fund-row";
   row.dataset.code = ev.code;
   const [label, cls] = MARK[ev.signal] || MARK.neutral;
+  const conf = Math.round(ev.confidence);
   row.innerHTML = `
     <span class="st">✓</span>
     <span class="code">${ev.code}</span>
     <span class="name">${escapeHtml(ev.name)}</span>
     <span class="mark ${cls}">${label}</span>
-    <span class="conf ${cls}">${Math.round(ev.confidence)}%</span>`;
+    <span class="conf ${cls}">${conf}%</span>`;
   if (!existing) $("progress-list").appendChild(row);
   rows.set(ev.code, { row, data: ev });
   fundsByCode.set(ev.code, ev);
-  $("status-line").textContent = `已分析 ${ev.done}/${ev.total} 只…`;
+  $("status-text").textContent = `${ev.done} / ${ev.total} 已分析`;
 }
 
 function finish(orderList) {
@@ -146,20 +145,19 @@ function finish(orderList) {
   list.innerHTML = "";
   for (const item of order) {
     const ev = fundsByCode.get(item.code);
+    if (!ev) continue;
     const [label, cls] = MARK[item.signal] || MARK.neutral;
     const row = document.createElement("div");
     row.className = "fund-row";
     row.innerHTML = `
-      <span class="st">${item.rank}.</span>
+      <span class="st">${item.rank}</span>
       <span class="code">${ev.code}</span>
       <span class="name">${escapeHtml(ev.name)}</span>
       <span class="mark ${cls}">${label}</span>
       <span class="conf ${cls}">${Math.round(ev.confidence)}%</span>`;
     row.onclick = () => showDetail(ev);
-    row.style.cursor = "pointer";
     list.appendChild(row);
   }
-  $("status-line").textContent = "";  // no longer visible
 }
 
 function showDetail(ev) {
@@ -167,45 +165,66 @@ function showDetail(ev) {
   const [label, cls] = MARK[ev.signal] || MARK.neutral;
   const snap = ev.snapshot || {};
   const quant = ev.quant;
-  const holdings = (snap.holdings || []).map(h =>
-    `<div>${escapeHtml(h.name)} <span style="color:var(--muted)">${escapeHtml(h.code)}</span> ` +
-    `<span style="color:var(--cyan)">${h.percent == null ? "—" : h.percent.toFixed(1) + "%"}</span></div>`
+
+  const holdingsRows = (snap.holdings || []).map(h =>
+    `<div class="h-row">
+      <span class="h-name">${escapeHtml(h.name)}</span>
+      <span class="h-code">${escapeHtml(h.code)}</span>
+      <span class="h-pct">${h.percent == null ? "—" : h.percent.toFixed(1) + "%"}</span>
+    </div>`
   ).join("");
 
-  const quantBar = quant
-    ? `<div class="quant-bar">
-        量化综合 <b>${quant.total >= 0 ? "+" : ""}${quant.total.toFixed(2)}</b>
-        <span>动量 ${fmtRaw(quant.raw.momentum_12m)}</span>
-        <span>Alpha年化 ${fmtRaw(quant.raw.alpha_annualized)}</span>
-        <span>集中度 ${quant.raw.concentration == null ? "—" : Math.round(quant.raw.concentration * 100) + "%"}</span>
-       </div>`
-    : "";
+  let quantHtml = "";
+  if (quant) {
+    const r = quant.raw;
+    quantHtml = `
+    <div class="quant-bar">
+      <div class="q-total ${quant.total >= 0 ? 'mark-buy' : 'mark-avoid'}">
+        ${quant.total >= 0 ? "+" : ""}${quant.total.toFixed(2)}
+      </div>
+      <div class="q-item">
+        <span class="q-label">动量</span>
+        <span class="q-value">${fmtRaw(r.momentum_12m)}</span>
+      </div>
+      <div class="q-item">
+        <span class="q-label">年化</span>
+        <span class="q-value">${fmtRaw(r.alpha_annualized)}</span>
+      </div>
+      <div class="q-item">
+        <span class="q-label">集中度</span>
+        <span class="q-value">${r.concentration == null ? "—" : Math.round(r.concentration * 100) + "%"}</span>
+      </div>
+    </div>`;
+  }
 
   body.innerHTML = `
-    <h3>${escapeHtml(ev.name)} <span style="color:var(--muted);font-size:0.85rem">${ev.code}</span></h3>
-    <div class="mark ${cls}" style="font-size:1.05rem;margin-bottom:0.8rem">${label} · ${Math.round(ev.confidence)}%</div>
-    ${quantBar}
-    <h4>量化与 LLM 理由</h4>
+    <h3>${escapeHtml(ev.name)}</h3>
+    <span class="detail-code">${ev.code}</span>
+    <div class="detail-verdict ${cls}">${label} · ${Math.round(ev.confidence)}%</div>
+    ${quantHtml}
+    <h4>分析理由</h4>
     <div class="reason">${escapeHtml(ev.reasoning)}</div>
     <h4>基本面快照</h4>
     <dl class="kv">
-      <dt>规模</dt><dd>${snap.scale_billion == null ? "数据缺失" : snap.scale_billion.toFixed(1) + " 亿元"}</dd>
-      <dt>成立</dt><dd>${escapeHtml(snap.inception || "数据缺失")}</dd>
-      <dt>类型</dt><dd>${escapeHtml(snap.fund_type || "数据缺失")}</dd>
+      <dt>规模</dt><dd>${snap.scale_billion == null ? "—" : snap.scale_billion.toFixed(1) + " 亿"}</dd>
+      <dt>成立</dt><dd>${escapeHtml(snap.inception || "—")}</dd>
+      <dt>类型</dt><dd>${escapeHtml(snap.fund_type || "—")}</dd>
       <dt>费率</dt><dd>申购 ${snap.purchase_fee == null ? "—" : snap.purchase_fee.toFixed(2) + "%"} · 管理 ${snap.mgmt_fee == null ? "—" : snap.mgmt_fee.toFixed(2) + "%"} · 托管 ${snap.custody_fee == null ? "—" : snap.custody_fee.toFixed(2) + "%"}</dd>
-      <dt>近1年</dt><dd>${PCT(snap.return_1y, true)}</dd>
-      <dt>近3年</dt><dd>${PCT(snap.return_3y, true)}</dd>
-      <dt>今年</dt><dd>${PCT(snap.ytd, true)}</dd>
-      <dt>最大回撤</dt><dd>${PCT(snap.max_drawdown)}</dd>
-      <dt>经理</dt><dd>${escapeHtml(snap.manager || "数据缺失")}${snap.manager_tenure ? "（" + escapeHtml(snap.manager_tenure) + "）" : ""}</dd>
+      <dt>近1年</dt><dd style="color:${colorForReturn(snap.return_1y)}">${PCT(snap.return_1y, true)}</dd>
+      <dt>近3年</dt><dd style="color:${colorForReturn(snap.return_3y)}">${PCT(snap.return_3y, true)}</dd>
+      <dt>今年</dt><dd style="color:${colorForReturn(snap.ytd)}">${PCT(snap.ytd, true)}</dd>
+      <dt>最大回撤</dt><dd style="color:var(--red)">${PCT(snap.max_drawdown)}</dd>
+      <dt>经理</dt><dd>${escapeHtml(snap.manager || "—")}${snap.manager_tenure ? "（" + escapeHtml(snap.manager_tenure) + "）" : ""}</dd>
     </dl>
-    ${holdings ? `<h4>前十大重仓</h4><div class="holdings">${holdings}</div>` : ""}
+    ${holdingsRows ? `<h4>前十大重仓</h4><div class="holdings">${holdingsRows}</div>` : ""}
   `;
   $("detail").classList.remove("hidden");
+  $("detail-backdrop").classList.remove("hidden");
 }
 
 function closeDetail() {
   $("detail").classList.add("hidden");
+  $("detail-backdrop").classList.add("hidden");
 }
 
 function resetView() {
@@ -220,6 +239,11 @@ function resetView() {
 function fmtRaw(v) {
   if (v == null) return "—";
   return (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + "%";
+}
+
+function colorForReturn(v) {
+  if (v == null) return "var(--dim)";
+  return v >= 0 ? "var(--green)" : "var(--red)";
 }
 
 function escapeHtml(s) {

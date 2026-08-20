@@ -9,37 +9,59 @@
 <body>
 <header class="topbar">
   <div class="brand">
-    <span class="brand-mark">基</span>
-    <div>
-      <h1>基金选购</h1>
-      <p class="tagline">国内场外公募基金 · 选主题，让分析师逐个打分</p>
+    <div class="brand-logo">
+      <span class="brand-icon">基</span>
+      <span class="brand-pulse"></span>
+    </div>
+    <div class="brand-text">
+      <h1>Fund <span class="accent">Lab</span></h1>
+      <p class="tagline">国内场外公募基金 · 主题筛选 · 量化信号 · LLM 合成</p>
     </div>
   </div>
-  <div id="conn" class="conn ok" title="与本地分析服务连接状态"></div>
+  <div class="topbar-right">
+    <div id="conn" class="conn" title="连接状态">
+      <span class="conn-dot"></span>
+    </div>
+  </div>
 </header>
 
 <main>
   <section id="step-theme" class="panel">
-    <h2>① 选择主题</h2>
+    <div class="panel-header">
+      <span class="step-badge">01</span>
+      <h2>选择主题</h2>
+    </div>
     <div id="theme-grid" class="grid"></div>
   </section>
 
   <section id="step-progress" class="panel hidden">
-    <h2>② 分析进度</h2>
-    <div id="status-line" class="status"></div>
+    <div class="panel-header">
+      <span class="step-badge">02</span>
+      <h2>分析进度</h2>
+    </div>
+    <div id="status-line" class="status">
+      <span class="status-dot pulse"></span>
+      <span id="status-text"></span>
+    </div>
     <div id="progress-list" class="progress"></div>
   </section>
 
   <section id="step-report" class="panel hidden">
-    <h2>③ 分析报告</h2>
+    <div class="panel-header">
+      <span class="step-badge done">03</span>
+      <h2>分析报告</h2>
+    </div>
     <div id="report-list" class="report"></div>
   </section>
 </main>
 
 <aside id="detail" class="detail hidden">
-  <button id="detail-close" class="close" title="关闭">×</button>
+  <button id="detail-close" class="detail-close" title="关闭">
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M4 4l10 10M14 4L4 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+  </button>
   <div id="detail-body"></div>
 </aside>
+<div id="detail-backdrop" class="detail-backdrop hidden" onclick="closeDetail()"></div>
 
 <footer class="foot">
   <span>分析仅基于公开数据 + 量化模型 + LLM 推理，不构成投资建议</span>
