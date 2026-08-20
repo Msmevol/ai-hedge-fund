@@ -30,12 +30,36 @@
 </header>
 
 <main>
+  <section id="daily-banner" class="daily-banner hidden">
+    <div class="daily-inner">
+      <div class="daily-badge">今日推荐</div>
+      <div class="daily-info">
+        <span id="daily-theme" class="daily-theme"></span>
+        <span id="daily-fund" class="daily-fund"></span>
+        <span id="daily-verdict" class="daily-verdict"></span>
+      </div>
+      <button id="daily-detail-btn" class="btn-ghost" onclick="showDailyDetail()">查看详情</button>
+    </div>
+  </section>
+
   <section id="step-theme" class="panel">
     <div class="panel-header">
       <span class="step-badge">01</span>
       <h2>选择主题</h2>
     </div>
     <div id="theme-grid" class="grid"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-header">
+      <span class="step-badge custom">定制</span>
+      <h2>指定基金分析</h2>
+    </div>
+    <div class="custom-input">
+      <input id="fund-code-input" type="text" placeholder="输入基金代码，如 010013"
+             maxlength="6" pattern="[0-9]{6}">
+      <button id="btn-analyze-fund" class="primary" onclick="startSingleFund()">分析</button>
+    </div>
   </section>
 
   <section id="step-progress" class="panel hidden">

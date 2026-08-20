@@ -170,3 +170,35 @@ def _snapshot_from_dict(data: dict) -> FundSnapshot:
         for h in data.get("holdings") or []
     )
     return FundSnapshot(**{**data, "holdings": holdings})
+
+
+def run_single_fund_analysis(code: str, on_event) -> None:
+    """Analyze a single fund by code. Streams fund_start → fund_done events."""
+    client = FundClient()
+    try:
+        info = client.get_fund_info(code)
+    finally:
+        client.close()
+
+    on_event({"type": "fund_start", "code": info.code, "name": info.name})
+
+    verdict, snapshot, quant = _one(info)
+    on_event({
+        "type": "fund_done",
+        "done": 1,
+        "total": 1,
+        "code": verdict.code,
+        "name": verdict.name,
+        "signal": verdict.signal,
+        "confidence": verdict.confidence,
+        "reasoning": verdict.reasoning,
+        "quant": asdict(quant) if quant is not None else None,
+        "snapshot": _snapshot_dict(snapshot) if snapshot else None,
+    })
+
+    on_event({
+        "type": "done",
+        "total": 1,
+        "order": [{"code": verdict.code, "rank": 1,
+                   "signal": verdict.signal, "label": verdict.label}],
+    })

@@ -287,6 +287,32 @@ class FundClient:
     def close(self) -> None:
         self._session.close()
 
+    # ------------------------------------------------------------------
+    # Single fund lookup
+    # ------------------------------------------------------------------
+
+    def get_fund_info(self, code: str) -> FundInfo:
+        """Fetch fund metadata by code from pingzhongdata, returning a
+        FundInfo suitable for fetch_snapshot / fetch_quant_input."""
+        pz = self._pingzhong(code)
+        name = pz.get("fS_name", "")
+        fund_type = _TYPES.get(pz.get("fund_sourceRate", ""), "")
+        inception = pz.get("fSRDate", "") or ""
+        if isinstance(inception, (int, float)):
+            inception = datetime.fromtimestamp(inception / 1000).strftime("%Y-%m-%d")
+        acw = pz.get("Data_ACWorthTrend") or []
+        scale = None
+        if acw:
+            scale = acw[-1][1] if acw[-1] else None
+        return FundInfo(
+            code=code,
+            name=name,
+            fund_type=fund_type or "股票型",
+            inception=inception,
+            scale_billion=scale,
+            purchase_fee=None,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Pure parsers (unit-testable without the network)

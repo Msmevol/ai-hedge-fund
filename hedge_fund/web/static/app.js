@@ -16,9 +16,11 @@ let es = null;
 let rows = new Map();
 let order = [];
 const fundsByCode = new Map();
+let dailyPick = null;
 
 async function init() {
   startClock();
+  loadDaily();
   const res = await fetch("/api/themes");
   const { themes } = await res.json();
   const grid = $("theme-grid");
@@ -30,6 +32,9 @@ async function init() {
     grid.appendChild(card);
   }
   $("detail-close").onclick = closeDetail;
+  $("fund-code-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") startSingleFund();
+  });
 }
 
 function startClock() {
@@ -51,6 +56,45 @@ function toggleFullscreen() {
   }
 }
 
+/* ── Daily Recommendation ─────────────────────── */
+
+async function loadDaily() {
+  try {
+    const res = await fetch("/api/daily");
+    const data = await res.json();
+    if (data.pick) showDailyBanner(data.pick);
+  } catch (_) {}
+}
+
+function showDailyBanner(pick) {
+  dailyPick = pick;
+  const banner = $("daily-banner");
+  banner.classList.remove("hidden");
+  $("daily-theme").textContent = `#${pick.theme}`;
+  $("daily-fund").textContent = `${pick.name}（${pick.code}）`;
+  const [label, cls] = MARK[pick.signal] || MARK.neutral;
+  $("daily-verdict").className = `daily-verdict ${cls}`;
+  $("daily-verdict").textContent = `${label} · ${Math.round(pick.confidence)}%`;
+}
+
+function showDailyDetail() {
+  if (!dailyPick || !dailyPick.snapshot) return;
+  showDetail({
+    code: dailyPick.code,
+    name: dailyPick.name,
+    signal: dailyPick.signal,
+    confidence: dailyPick.confidence,
+    reasoning: dailyPick.reasoning,
+    quant: dailyPick.quant_total != null ? {
+      total: dailyPick.quant_total,
+      raw: {}
+    } : null,
+    snapshot: dailyPick.snapshot,
+  });
+}
+
+/* ── Theme Selection ───────────────────────────── */
+
 function selectTheme(t, card) {
   theme = t;
   document.querySelectorAll(".theme-card").forEach(c => c.classList.remove("sel"));
@@ -71,6 +115,8 @@ function ensureStartBtn() {
   $("step-theme").appendChild(btn);
   return btn;
 }
+
+/* ── Theme Analysis ────────────────────────────── */
 
 async function start() {
   if (!theme || es) return;
@@ -97,6 +143,42 @@ async function start() {
   es.onerror = () => setConn(false);
 }
 
+/* ── Single Fund Analysis ──────────────────────── */
+
+async function startSingleFund() {
+  const input = $("fund-code-input");
+  const code = input.value.trim();
+  if (!code || !/^\d{6}$/.test(code)) {
+    input.style.borderColor = "var(--red)";
+    setTimeout(() => { input.style.borderColor = ""; }, 1500);
+    return;
+  }
+  if (es) return;
+  resetView();
+  $("step-progress").classList.remove("hidden");
+  $("status-text").textContent = `正在分析基金 ${code}…`;
+  $("btn-analyze-fund").disabled = true;
+  const res = await fetch("/api/analyze-fund", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    $("status-text").textContent = `启动失败：${err.detail || res.status}`;
+    setConn(false);
+    $("btn-analyze-fund").disabled = false;
+    return;
+  }
+  const { task_id } = await res.json();
+  taskId = task_id;
+  es = new EventSource(`/api/stream/${task_id}`);
+  es.onmessage = onEvent;
+  es.onerror = () => setConn(false);
+}
+
+/* ── SSE Event Handler ─────────────────────────── */
+
 function onEvent(e) {
   const ev = JSON.parse(e.data);
   setConn(true);
@@ -119,6 +201,7 @@ function onEvent(e) {
       $("status-text").textContent = "分析失败：" + ev.message;
       setConn(false);
       es.close(); es = null;
+      $("btn-analyze-fund").disabled = false;
       break;
     case "done_ack":
       break;
@@ -159,6 +242,7 @@ function addFundRow(ev) {
 function finish(orderList) {
   order = orderList;
   es.close(); es = null;
+  $("btn-analyze-fund").disabled = false;
   $("step-progress").classList.add("hidden");
   $("step-report").classList.remove("hidden");
   const list = $("report-list");
@@ -180,6 +264,8 @@ function finish(orderList) {
   }
 }
 
+/* ── Detail Panel ──────────────────────────────── */
+
 function showDetail(ev) {
   const body = $("detail-body");
   const [label, cls] = MARK[ev.signal] || MARK.neutral;
@@ -196,7 +282,7 @@ function showDetail(ev) {
 
   let quantHtml = "";
   if (quant) {
-    const r = quant.raw;
+    const r = quant.raw || {};
     quantHtml = `
     <div class="quant-bar">
       <div class="q-total ${quant.total >= 0 ? 'mark-buy' : 'mark-avoid'}">

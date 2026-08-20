@@ -606,6 +606,118 @@ button.primary:disabled {
 .hidden { display: none !important; }
 
 /* ═══════════════════════════════════════════
+   DAILY BANNER — 置顶每日推荐
+   ═══════════════════════════════════════════ */
+.daily-banner {
+  background: linear-gradient(135deg, rgba(0,224,184,0.08), rgba(88,166,255,0.05));
+  border: 1px solid rgba(0,224,184,0.2);
+  border-radius: var(--radius-lg);
+  padding: 1.2rem 1.8rem;
+  animation: banner-in 0.5s ease-out;
+}
+
+@keyframes banner-in {
+  from { opacity: 0; transform: translateY(-12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.daily-inner {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.daily-badge {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border: 1px solid rgba(0,224,184,0.2);
+  border-radius: var(--radius-sm);
+  padding: 0.3rem 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.daily-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 1.2rem;
+  font-size: 1.1rem;
+}
+
+.daily-theme {
+  color: var(--dim);
+  font-size: 0.85rem;
+}
+
+.daily-fund {
+  color: var(--text);
+  font-weight: 700;
+  font-size: 1.2rem;
+}
+
+.daily-verdict {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.daily-verdict.mark-buy { color: var(--green); }
+.daily-verdict.mark-hold { color: var(--amber); }
+.daily-verdict.mark-avoid { color: var(--red); }
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  padding: 0.4rem 1rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-ghost:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ═══════════════════════════════════════════
+   CUSTOM FUND INPUT
+   ═══════════════════════════════════════════ */
+.custom-input {
+  display: flex;
+  gap: 0.8rem;
+  align-items: center;
+}
+
+.custom-input input {
+  flex: 1;
+  max-width: 280px;
+  padding: 0.7rem 1rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
+  letter-spacing: 0.08em;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.custom-input input::placeholder { color: var(--dim); letter-spacing: 0.02em; }
+.custom-input input:focus { border-color: var(--accent); }
+
+.step-badge.custom {
+  background: rgba(88,166,255,0.1);
+  color: var(--blue);
+  border-color: rgba(88,166,255,0.2);
+}
+
+/* ═══════════════════════════════════════════
    SCROLLBAR
    ═══════════════════════════════════════════ */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
